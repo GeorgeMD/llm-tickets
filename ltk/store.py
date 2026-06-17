@@ -1,0 +1,383 @@
+"""Data access layer for the .tickets/ folder structure."""
+
+import json
+import os
+import secrets
+import shutil
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+TICKETS_DIR = ".tickets"
+EPICS_FILE = ".epics.json"
+TICKETS_FILE = ".tickets.json"
+
+TICKET_STATUSES = ("open", "in_progress", "blocked", "closed")
+
+
+# ---------------------------------------------------------------------------
+# .tickets root discovery
+# ---------------------------------------------------------------------------
+
+def find_tickets_root(start_path: Optional[Path] = None) -> Optional[Path]:
+    """Walk up from *start_path* (default: cwd) looking for a .tickets/ dir."""
+    path = Path(start_path or os.getcwd()).resolve()
+    while True:
+        candidate = path / TICKETS_DIR
+        if candidate.is_dir():
+            return candidate
+        parent = path.parent
+        if parent == path:          # filesystem root
+            return None
+        path = parent
+
+
+def require_root() -> Path:
+    """Return the .tickets root or exit with a helpful message."""
+    root = find_tickets_root()
+    if root is None:
+        raise FileNotFoundError(
+            "No .tickets/ directory found.\n"
+            "Run 'ltk init <project_root>' to initialise a project."
+        )
+    return root
+
+
+def init_project(project_root: Path) -> Path:
+    """Create .tickets/ and seed .epics.json at *project_root*."""
+    tickets_path = project_root.resolve() / TICKETS_DIR
+    if tickets_path.exists():
+        raise FileExistsError(
+            f".tickets/ already exists at {project_root.resolve()}"
+        )
+    tickets_path.mkdir(parents=True)
+    _save_json(tickets_path / EPICS_FILE, {})
+    return tickets_path
+
+
+# ---------------------------------------------------------------------------
+# Epic helpers
+# ---------------------------------------------------------------------------
+
+def load_epics(root: Path) -> Dict[str, str]:
+    """Return {epic_id: epic_name} mapping."""
+    return _load_json(root / EPICS_FILE)
+
+
+def save_epics(root: Path, data: Dict[str, str]) -> None:
+    _save_json(root / EPICS_FILE, data)
+
+
+def generate_epic_id(existing_ids: set) -> str:
+    """Generate a unique epic-<6 hex chars> id."""
+    for _ in range(1000):
+        eid = f"epic-{secrets.token_hex(3)}"
+        if eid not in existing_ids:
+            return eid
+    raise RuntimeError("Failed to generate a unique epic ID")
+
+
+def create_epic(root: Path, name: str) -> str:
+    """Create a new epic folder and register it.  Returns the epic_id."""
+    epics = load_epics(root)
+    epic_id = generate_epic_id(set(epics.keys()))
+    epics[epic_id] = name
+    save_epics(root, epics)
+    epic_dir = root / epic_id
+    epic_dir.mkdir()
+    _save_json(epic_dir / TICKETS_FILE, {})
+    return epic_id
+
+
+def delete_epic(root: Path, epic_id: str) -> None:
+    """Remove an epic folder and its registry entry."""
+    epics = load_epics(root)
+    if epic_id not in epics:
+        raise KeyError(f"Epic '{epic_id}' not found")
+    epic_dir = root / epic_id
+    if epic_dir.exists():
+        shutil.rmtree(epic_dir)
+    del epics[epic_id]
+    save_epics(root, epics)
+
+
+def rename_epic(root: Path, epic_id: str, new_name: str) -> None:
+    epics = load_epics(root)
+    if epic_id not in epics:
+        raise KeyError(f"Epic '{epic_id}' not found")
+    epics[epic_id] = new_name
+    save_epics(root, epics)
+
+
+def resolve_epic(root: Path, identifier: str) -> Tuple[str, str]:
+    """Resolve an epic by full ID, ID prefix, or name.  Returns (id, name)."""
+    epics = load_epics(root)
+
+    # exact id
+    if identifier in epics:
+        return identifier, epics[identifier]
+
+    # prefix match on id
+    matches = [
+        (eid, name) for eid, name in epics.items()
+        if eid.startswith(identifier)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous epic identifier '{identifier}'. "
+            f"Matches: {', '.join(m[0] for m in matches)}"
+        )
+
+    # name match (case-insensitive)
+    matches = [
+        (eid, name) for eid, name in epics.items()
+        if name.lower() == identifier.lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous epic name '{identifier}'. "
+            f"Matches: {', '.join(m[0] for m in matches)}"
+        )
+
+    raise KeyError(f"Epic '{identifier}' not found")
+
+
+# ---------------------------------------------------------------------------
+# Ticket helpers
+# ---------------------------------------------------------------------------
+
+def load_tickets(root: Path, epic_id: str) -> Dict[str, Dict[str, Any]]:
+    """Return {ticket_id: {name, status, depends}} for an epic."""
+    return _load_json(root / epic_id / TICKETS_FILE)
+
+
+def save_tickets(
+    root: Path, epic_id: str, data: Dict[str, Dict[str, Any]]
+) -> None:
+    _save_json(root / epic_id / TICKETS_FILE, data)
+
+
+def generate_ticket_id(epic_id: str, existing_ids: set) -> str:
+    """Generate <last-2-of-epic>-<6 hex chars>, unique within the epic."""
+    prefix = epic_id[-2:]
+    for _ in range(1000):
+        tid = f"{prefix}-{secrets.token_hex(3)}"
+        if tid not in existing_ids:
+            return tid
+    raise RuntimeError("Failed to generate a unique ticket ID")
+
+
+def create_ticket(root: Path, epic_id: str, name: str) -> str:
+    """Create a ticket .md file and register it.  Returns the ticket_id."""
+    epics = load_epics(root)
+    if epic_id not in epics:
+        raise KeyError(f"Epic '{epic_id}' not found")
+    tickets = load_tickets(root, epic_id)
+    ticket_id = generate_ticket_id(epic_id, set(tickets.keys()))
+    tickets[ticket_id] = {
+        "name": name,
+        "status": "open",
+        "depends": [],
+    }
+    save_tickets(root, epic_id, tickets)
+    ticket_path = root / epic_id / f"{ticket_id}.md"
+    ticket_path.write_text(f"# {name}\n", encoding="utf-8")
+    return ticket_id
+
+
+def delete_ticket(root: Path, epic_id: str, ticket_id: str) -> None:
+    """Delete a ticket file and remove it from the registry and dependencies."""
+    tickets = load_tickets(root, epic_id)
+    if ticket_id not in tickets:
+        raise KeyError(f"Ticket '{ticket_id}' not found")
+
+    # Remove from other tickets' dependency lists
+    for meta in tickets.values():
+        deps = meta.get("depends", [])
+        if ticket_id in deps:
+            deps.remove(ticket_id)
+
+    del tickets[ticket_id]
+    save_tickets(root, epic_id, tickets)
+
+    ticket_path = root / epic_id / f"{ticket_id}.md"
+    if ticket_path.exists():
+        ticket_path.unlink()
+
+
+def rename_ticket(
+    root: Path, epic_id: str, ticket_id: str, new_name: str
+) -> None:
+    tickets = load_tickets(root, epic_id)
+    if ticket_id not in tickets:
+        raise KeyError(f"Ticket '{ticket_id}' not found")
+    tickets[ticket_id]["name"] = new_name
+    save_tickets(root, epic_id, tickets)
+
+
+def edit_ticket(
+    root: Path, epic_id: str, ticket_id: str, content: str
+) -> None:
+    """Overwrite the ticket markdown file with *content*."""
+    tickets = load_tickets(root, epic_id)
+    if ticket_id not in tickets:
+        raise KeyError(f"Ticket '{ticket_id}' not found")
+    ticket_path = root / epic_id / f"{ticket_id}.md"
+    ticket_path.write_text(content, encoding="utf-8")
+
+
+def read_ticket(root: Path, epic_id: str, ticket_id: str) -> str:
+    ticket_path = root / epic_id / f"{ticket_id}.md"
+    if not ticket_path.exists():
+        raise FileNotFoundError(f"Ticket file not found: {ticket_path}")
+    return ticket_path.read_text(encoding="utf-8")
+
+
+def add_dependencies(
+    root: Path,
+    epic_id: str,
+    ticket_id: str,
+    dep_ids: List[str],
+) -> None:
+    """Add dependency edges (within the same epic).  Validates and detects cycles."""
+    from ltk.utils import would_create_cycle  # deferred to avoid circular import
+
+    tickets = load_tickets(root, epic_id)
+    if ticket_id not in tickets:
+        raise KeyError(f"Ticket '{ticket_id}' not found")
+
+    for dep_id in dep_ids:
+        if dep_id not in tickets:
+            raise KeyError(
+                f"Dependency '{dep_id}' not found in the same epic"
+            )
+        if dep_id == ticket_id:
+            raise ValueError("A ticket cannot depend on itself")
+
+    # Cycle check
+    for dep_id in dep_ids:
+        if would_create_cycle(tickets, ticket_id, dep_id):
+            raise ValueError(
+                f"Adding dependency {ticket_id} -> {dep_id} would create "
+                f"a circular dependency"
+            )
+
+    current_deps = set(tickets[ticket_id].get("depends", []))
+    tickets[ticket_id]["depends"] = list(current_deps | set(dep_ids))
+
+    # Set status to blocked if any dependency is not closed
+    has_open_dep = any(
+        tickets[d]["status"] != "closed"
+        for d in tickets[ticket_id]["depends"]
+    )
+    if has_open_dep:
+        tickets[ticket_id]["status"] = "blocked"
+
+    save_tickets(root, epic_id, tickets)
+
+
+def close_ticket(
+    root: Path, epic_id: str, ticket_id: str
+) -> List[str]:
+    """Close a ticket and unblock dependents whose deps are all closed.
+
+    Returns a list of ticket IDs that were unblocked.
+    """
+    tickets = load_tickets(root, epic_id)
+    if ticket_id not in tickets:
+        raise KeyError(f"Ticket '{ticket_id}' not found")
+
+    tickets[ticket_id]["status"] = "closed"
+
+    unblocked: List[str] = []
+    for tid, meta in tickets.items():
+        if tid == ticket_id:
+            continue
+        if meta["status"] != "blocked":
+            continue
+        if ticket_id not in meta.get("depends", []):
+            continue
+        # All deps closed?
+        all_closed = all(
+            tickets.get(d, {}).get("status") == "closed"
+            for d in meta["depends"]
+        )
+        if all_closed:
+            meta["status"] = "open"
+            unblocked.append(tid)
+
+    save_tickets(root, epic_id, tickets)
+    return unblocked
+
+
+def resolve_ticket(
+    root: Path, identifier: str
+) -> Tuple[str, str, Dict[str, Any]]:
+    """Resolve a ticket by full ID or prefix across all epics.
+
+    Returns (epic_id, ticket_id, ticket_meta).
+    """
+    epics = load_epics(root)
+    all_matches: List[Tuple[str, str, Dict[str, Any]]] = []
+
+    for epic_id in epics:
+        tickets = load_tickets(root, epic_id)
+        # exact match
+        if identifier in tickets:
+            return epic_id, identifier, tickets[identifier]
+        # prefix match
+        for tid, meta in tickets.items():
+            if tid.startswith(identifier):
+                all_matches.append((epic_id, tid, meta))
+
+    if len(all_matches) == 1:
+        return all_matches[0]
+    if len(all_matches) > 1:
+        raise ValueError(
+            f"Ambiguous ticket identifier '{identifier}'. Matches: "
+            + ", ".join(f"{m[1]} (in {m[0]})" for m in all_matches)
+        )
+    raise KeyError(f"Ticket '{identifier}' not found")
+
+
+def resolve_ticket_in_epic(
+    root: Path, epic_id: str, identifier: str
+) -> Tuple[str, Dict[str, Any]]:
+    """Resolve a ticket within a specific epic.  Returns (ticket_id, meta)."""
+    tickets = load_tickets(root, epic_id)
+
+    if identifier in tickets:
+        return identifier, tickets[identifier]
+
+    matches = [
+        (tid, meta) for tid, meta in tickets.items()
+        if tid.startswith(identifier)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(
+            f"Ambiguous ticket '{identifier}'. "
+            f"Matches: {', '.join(m[0] for m in matches)}"
+        )
+    raise KeyError(f"Ticket '{identifier}' not found in epic '{epic_id}'")
+
+
+# ---------------------------------------------------------------------------
+# Low-level JSON I/O
+# ---------------------------------------------------------------------------
+
+def _load_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _save_json(path: Path, data: dict) -> None:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")

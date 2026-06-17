@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-tickets"
+version = "0.1.0"
+description = "A CLI ticket tracking system for AI agents"
+requires-python = ">=3.9"
+dependencies = ["click>=8.0"]
+
+[project.scripts]
+ltk = "ltk.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ltk*"]
