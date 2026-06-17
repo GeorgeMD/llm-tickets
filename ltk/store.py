@@ -297,7 +297,7 @@ def remove_dependencies(
             ticket_name = tickets[ticket_id]["name"]
             dep_name = tickets[dep_id]["name"]
             raise ValueError(
-                f"There is no dependency between '{ticket_name}' and '{dep_name}'"
+                f"There is no dependency: '{ticket_name}' -> '{dep_name}'"
             )
 
     updated_deps = [d for d in current_deps if d not in dep_ids]
