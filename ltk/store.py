@@ -279,6 +279,35 @@ def add_dependencies(
     save_tickets(root, epic_id, tickets)
 
 
+def remove_dependencies(
+    root: Path,
+    epic_id: str,
+    ticket_id: str,
+    dep_ids: List[str],
+) -> None:
+    """Remove dependency edges (within the same epic)."""
+    tickets = load_tickets(root, epic_id)
+    if ticket_id not in tickets:
+        raise KeyError(f"Ticket '{ticket_id}' not found")
+
+    current_deps = tickets[ticket_id].get("depends", [])
+    updated_deps = [d for d in current_deps if d not in dep_ids]
+    tickets[ticket_id]["depends"] = updated_deps
+
+    # If the ticket was blocked, check if it is still blocked
+    if tickets[ticket_id]["status"] == "blocked":
+        has_open_dep = any(
+            tickets[d]["status"] != "closed"
+            for d in tickets[ticket_id]["depends"]
+            if d in tickets
+        )
+        if not has_open_dep:
+            tickets[ticket_id]["status"] = "open"
+
+    save_tickets(root, epic_id, tickets)
+
+
+
 def close_ticket(
     root: Path, epic_id: str, ticket_id: str
 ) -> List[str]:

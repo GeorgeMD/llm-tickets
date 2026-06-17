@@ -41,7 +41,8 @@ Core guidelines for using `ltk`:
 | **ticket create**  | `ltk ticket create <epic> "<name>"`            | Creates a ticket in an epic. Returns the `xx-xxxxxx` ID.            |
 | **ticket list**    | `ltk ticket list <epic>`                       | Lists all tickets for a specific epic in a table view.              |
 | **ticket edit**    | `ltk ticket edit <ticket> "<markdown>"`        | Overwrites a ticket's `.md` file content with description.          |
-| **ticket depends** | `ltk ticket depends <ticket> <dep_tickets...>` | Marks a ticket as dependent on others (within the same epic).       |
+| **dep add**        | `ltk dep add <ticket> <dep_tickets...>`        | Marks a ticket as dependent on others (within the same epic).       |
+| **dep rm**         | `ltk dep rm <ticket> <dep_tickets...>`         | Removes dependency relationships between tickets.                   |
 | **ticket rename**  | `ltk ticket rename <ticket> "<new_name>"`      | Renames a ticket.                                                   |
 | **ticket close**   | `ltk ticket close <ticket>`                    | Closes a ticket, automatically unblocking dependent tickets.        |
 | **ticket delete**  | `ltk ticket delete <ticket>`                   | Deletes a ticket and removes it from all dependency lists.          |
@@ -80,13 +81,20 @@ Break down your work into manageable tasks:
   # Returns: Created ticket <ticket 2 id> "Implement Session Management" in <epic id>
   ```
 
-### 3. Setting Up Dependencies
+### 3. Setting Up and Removing Dependencies
 
 If a task requires another to be done first, declare the dependency:
 
 ```bash
-ltk ticket depends <ticket 2 id> <ticket 1 id>
+ltk dep add <ticket 2 id> <ticket 1 id>
 # Sets status of <ticket 2 id> to [blocked] because <ticket 1 id> is not yet closed.
+```
+
+To remove a dependency:
+
+```bash
+ltk dep rm <ticket 2 id> <ticket 1 id>
+# Removes the dependency of ticket 2 on ticket 1, unblocking ticket 2 if no other open dependencies remain.
 ```
 
 _Note: Dependencies are only supported within the same epic._

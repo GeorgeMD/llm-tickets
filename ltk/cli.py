@@ -215,32 +215,6 @@ def ticket_delete(ticket_identifier):
     )
 
 
-@ticket.command("depends")
-@click.argument("ticket_identifier")
-@click.argument("dependencies", nargs=-1, required=True)
-@_handle_error
-def ticket_depends(ticket_identifier, dependencies):
-    """Mark a ticket as depending on one or more other tickets.
-
-    Dependencies must be within the same epic.
-    """
-    root = store.require_root()
-    epic_id, ticket_id, meta = store.resolve_ticket(root, ticket_identifier)
-
-    # Resolve each dependency within the same epic
-    resolved_deps = []
-    for dep_ident in dependencies:
-        dep_id, _ = store.resolve_ticket_in_epic(root, epic_id, dep_ident)
-        resolved_deps.append(dep_id)
-
-    store.add_dependencies(root, epic_id, ticket_id, resolved_deps)
-
-    dep_names = ", ".join(resolved_deps)
-    click.echo(
-        click.style("[ok] ", fg="green")
-        + f"{ticket_id} now depends on: {dep_names}"
-    )
-
 
 @ticket.command("rename")
 @click.argument("ticket_identifier")
@@ -278,6 +252,67 @@ def ticket_close(ticket_identifier):
                 click.style("  >> ", fg="cyan")
                 + f"Unblocked {uid} \"{uname}\""
             )
+
+
+# ── dep group ──────────────────────────────────────────────────────────────
+
+@main.group()
+def dep():
+    """Manage dependencies between tickets."""
+
+
+@dep.command("add")
+@click.argument("ticket_identifier")
+@click.argument("dependencies", nargs=-1, required=True)
+@_handle_error
+def dep_add(ticket_identifier, dependencies):
+    """Mark a ticket as depending on one or more other tickets.
+
+    Dependencies must be within the same epic.
+    """
+    root = store.require_root()
+    epic_id, ticket_id, meta = store.resolve_ticket(root, ticket_identifier)
+
+    # Resolve each dependency within the same epic
+    resolved_deps = []
+    for dep_ident in dependencies:
+        dep_id, _ = store.resolve_ticket_in_epic(root, epic_id, dep_ident)
+        resolved_deps.append(dep_id)
+
+    store.add_dependencies(root, epic_id, ticket_id, resolved_deps)
+
+    dep_names = ", ".join(resolved_deps)
+    click.echo(
+        click.style("[ok] ", fg="green")
+        + f"{ticket_id} now depends on: {dep_names}"
+    )
+
+
+@dep.command("rm")
+@click.argument("ticket_identifier")
+@click.argument("dependencies", nargs=-1, required=True)
+@_handle_error
+def dep_rm(ticket_identifier, dependencies):
+    """Remove one or more dependencies from a ticket.
+
+    Dependencies must be within the same epic.
+    """
+    root = store.require_root()
+    epic_id, ticket_id, meta = store.resolve_ticket(root, ticket_identifier)
+
+    # Resolve each dependency within the same epic
+    resolved_deps = []
+    for dep_ident in dependencies:
+        dep_id, _ = store.resolve_ticket_in_epic(root, epic_id, dep_ident)
+        resolved_deps.append(dep_id)
+
+    store.remove_dependencies(root, epic_id, ticket_id, resolved_deps)
+
+    dep_names = ", ".join(resolved_deps)
+    click.echo(
+        click.style("[ok] ", fg="green")
+        + f"Removed dependency on: {dep_names} from {ticket_id}"
+    )
 
 
 # ── tree ───────────────────────────────────────────────────────────────────

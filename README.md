@@ -36,7 +36,7 @@ ltk ticket create epic-a1b2c3 "Login endpoint"
 ltk ticket create epic-a1b2c3 "Session management"
 
 # Add dependencies (session management depends on login endpoint)
-ltk ticket depends c3-x9y8z7 c3-k4m5n6
+ltk dep add c3-x9y8z7 c3-k4m5n6
 
 # Edit a ticket (opens $EDITOR, or pass text directly)
 ltk ticket edit c3-x9y8z7 "## Login\n\nImplement OAuth2 flow"
@@ -61,7 +61,8 @@ ltk ticket close c3-k4m5n6
 | `ltk ticket list <epic>` | List tickets in an epic |
 | `ltk ticket edit <ticket> [text]` | Edit ticket content |
 | `ltk ticket delete <ticket>` | Delete a ticket |
-| `ltk ticket depends <ticket> <deps...>` | Add dependencies |
+| `ltk dep add <ticket> <deps...>` | Add dependencies |
+| `ltk dep rm <ticket> <deps...>` | Remove dependencies |
 | `ltk ticket rename <ticket> <new-name>` | Rename a ticket |
 | `ltk ticket close <ticket>` | Close a ticket |
 | `ltk tree` | Show the full project tree |
