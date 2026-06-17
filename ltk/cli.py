@@ -254,6 +254,23 @@ def ticket_close(ticket_identifier):
             )
 
 
+@ticket.command("start")
+@click.argument("ticket_identifier")
+@_handle_error
+def ticket_start(ticket_identifier):
+    """Mark a ticket as in progress."""
+    root = store.require_root()
+    epic_id, ticket_id, meta = store.resolve_ticket(root, ticket_identifier)
+    changed = store.start_ticket(root, epic_id, ticket_id)
+    if changed:
+        click.echo(
+            click.style("[ok] ", fg="green")
+            + f"Started ticket {ticket_id} \"{meta['name']}\""
+        )
+    else:
+        click.echo(f"Ticket {ticket_id} is already in progress.")
+
+
 # ── dep group ──────────────────────────────────────────────────────────────
 
 @main.group()

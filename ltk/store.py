@@ -391,6 +391,29 @@ def close_ticket(
     return unblocked
 
 
+def start_ticket(root: Path, epic_id: str, ticket_id: str) -> bool:
+    """Mark a ticket as in progress.
+
+    Returns True if the status was changed, or False if it was already in progress.
+    Raises ValueError if the ticket is blocked, closed, or in another invalid state.
+    """
+    tickets = load_tickets(root, epic_id)
+    if ticket_id not in tickets:
+        raise KeyError(f"Ticket '{ticket_id}' not found")
+
+    status = tickets[ticket_id].get("status", "open")
+    if status == "blocked":
+        raise ValueError(f"Ticket '{ticket_id}' is blocked")
+    if status == "closed":
+        raise ValueError(f"Ticket '{ticket_id}' is closed")
+    if status == "in_progress":
+        return False
+
+    tickets[ticket_id]["status"] = "in_progress"
+    save_tickets(root, epic_id, tickets)
+    return True
+
+
 def resolve_ticket(
     root: Path, identifier: str
 ) -> Tuple[str, str, Dict[str, Any]]:

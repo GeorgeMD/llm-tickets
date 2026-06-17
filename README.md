@@ -65,6 +65,7 @@ ltk ticket close c3-k4m5n6
 | `ltk dep rm <ticket> <deps...>` | Remove dependencies |
 | `ltk ticket rename <ticket> <new-name>` | Rename a ticket |
 | `ltk ticket close <ticket>` | Close a ticket |
+| `ltk ticket start <ticket>` | Mark a ticket as in progress |
 | `ltk tree` | Show the full project tree |
 | `ltk tree -i` | Browse tickets interactively with fzf + glow |
 

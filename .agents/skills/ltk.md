@@ -45,6 +45,7 @@ Core guidelines for using `ltk`:
 | **dep rm**         | `ltk dep rm <ticket> <dep_tickets...>`         | Removes dependency relationships between tickets.                   |
 | **ticket rename**  | `ltk ticket rename <ticket> "<new_name>"`      | Renames a ticket.                                                   |
 | **ticket close**   | `ltk ticket close <ticket>`                    | Closes a ticket, automatically unblocking dependent tickets.        |
+| **ticket start**   | `ltk ticket start <ticket>`                    | Marks a ticket as in progress.                                     |
 | **ticket delete**  | `ltk ticket delete <ticket>`                   | Deletes a ticket and removes it from all dependency lists.          |
 | **tree**           | `ltk tree`                                     | Displays the hierarchical tree of epics, tickets, and dependencies. |
 | **tree -i**        | `ltk tree -i`                                  | Opens the interactive terminal browser using `fzf` and `glow`.      |
@@ -119,9 +120,10 @@ echo -e "## Requirements\n- Verify passwords using bcrypt\n- Return JWT token on
   `[blocked]`.
 - **Open**: Tickets with no dependencies, or whose dependencies are all closed,
   are marked `[open]`.
-- **In Progress**: To mark a ticket as being actively worked on, update the
-  epic's `.tickets.json` file directly (under the ticket's `"status"` field, set
-  it to `"in_progress"`).
+- **In Progress**: To mark a ticket as being actively worked on, run:
+  ```bash
+  ltk ticket start <ticket id>
+  ```
 - **Closed**: When a task is complete, run:
   ```bash
   ltk ticket close <ticket 1 id>
