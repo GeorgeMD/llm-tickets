@@ -236,6 +236,45 @@ def read_ticket(root: Path, epic_id: str, ticket_id: str) -> str:
     return ticket_path.read_text(encoding="utf-8")
 
 
+import re
+
+_STEPS_HEADER_RE = re.compile(r"^#\s+Steps\s*$", re.MULTILINE)
+_STEP_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+_DONE_PREFIX = "\u2705"  # ✅
+
+
+def parse_steps(content: str) -> List[Dict[str, Any]]:
+    """Extract steps from a ticket's markdown content.
+
+    Looks for a ``# Steps`` H1 section.  Each ``## Title`` under it is a
+    step.  Steps whose title starts with the ✅ character are considered
+    done.  Returns a list of ``{"title": str, "done": bool}`` dicts, or
+    an empty list if parsing fails or no steps section exists.
+    """
+    # Find the # Steps header
+    match = _STEPS_HEADER_RE.search(content)
+    if not match:
+        return []
+
+    # Content after the # Steps header
+    after_steps = content[match.end():]
+
+    # Stop at the next H1 (if any) so we don't bleed into other sections
+    next_h1 = re.search(r"^#\s+", after_steps, re.MULTILINE)
+    if next_h1:
+        after_steps = after_steps[:next_h1.start()]
+
+    steps: List[Dict[str, Any]] = []
+    for step_match in _STEP_RE.finditer(after_steps):
+        raw_title = step_match.group(1).strip()
+        done = raw_title.startswith(_DONE_PREFIX)
+        title = raw_title.lstrip(_DONE_PREFIX).strip() if done else raw_title
+        steps.append({"title": title, "done": done})
+
+    return steps
+
+
+
 def add_dependencies(
     root: Path,
     epic_id: str,

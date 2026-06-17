@@ -115,8 +115,16 @@ def _c(code: str, text: str) -> str:
 def format_tree(
     epics: Dict[str, str],
     tickets_by_epic: Dict[str, Dict[str, Dict[str, Any]]],
+    steps_by_ticket: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
-    """Render the full project tree as a string."""
+    """Render the full project tree as a string.
+
+    *steps_by_ticket* maps ``ticket_id`` to a list of step dicts
+    (as returned by ``store.parse_steps``).
+    """
+    if steps_by_ticket is None:
+        steps_by_ticket = {}
+
     lines: List[str] = []
     sorted_epics = sorted(epics.items(), key=lambda x: x[1].lower())
 
@@ -141,10 +149,12 @@ def format_tree(
                 line = f"   {branch}{_c(_DIM, tid)}  {colored_name}"
                 lines.append(line)
 
+                # Continuation prefix for lines under this ticket
+                cont_prefix = "       " if is_last else "   |   "
+
                 # Show dependencies
                 deps = meta.get("depends", [])
                 if deps:
-                    prefix = "       " if is_last else "   |   "
                     dep_names = []
                     for d in deps:
                         if d in tickets:
@@ -152,8 +162,19 @@ def format_tree(
                         else:
                             dep_names.append(d)
                     lines.append(
-                        _c(_DIM, f"{prefix}-> depends on: {', '.join(dep_names)}")
+                        _c(_DIM, f"{cont_prefix}-> depends on: {', '.join(dep_names)}")
                     )
+
+                # Show steps (tasks)
+                ticket_steps = steps_by_ticket.get(tid, [])
+                for step in ticket_steps:
+                    if step["done"]:
+                        check = _c("\033[92m", "[x]")
+                        title = _c(_DIM, step["title"])
+                    else:
+                        check = _c(_DIM, "[ ]")
+                        title = step["title"]
+                    lines.append(f"{cont_prefix}{check} {title}")
 
         if idx < len(sorted_epics) - 1:
             lines.append("")  # blank separator between epics
@@ -206,9 +227,13 @@ def run_interactive_tree(
     root: "Path",
     epics: Dict[str, str],
     tickets_by_epic: Dict[str, Dict[str, Dict[str, Any]]],
+    steps_by_ticket: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> None:
     """Launch fzf with glow preview for interactive ticket browsing."""
     from pathlib import Path as _P
+
+    if steps_by_ticket is None:
+        steps_by_ticket = {}
 
     # Create an empty file in .tickets/.empty for epic headers/separators preview
     empty_filepath = root / ".empty"
@@ -250,6 +275,19 @@ def run_interactive_tree(
                 tid_ansi = _raw_ansi(_DIM, f"({tid})")
                 display = f"{branch_ansi}{colored_label} {name_part} {tid_ansi}"
                 lines.append(f"{filepath}\t{display}")
+
+                # Show steps (tasks) under the ticket
+                cont_prefix = "       " if is_last else "   |   "
+                ticket_steps = steps_by_ticket.get(tid, [])
+                for step in ticket_steps:
+                    if step["done"]:
+                        check = _raw_ansi("\033[92m", "[x]")
+                        title = _raw_ansi(_DIM, step["title"])
+                    else:
+                        check = _raw_ansi(_DIM, "[ ]")
+                        title = step["title"]
+                    step_display = f"{_raw_ansi(_DIM, cont_prefix)}{check} {title}"
+                    lines.append(f"{filepath}\t{step_display}")
         
         if idx < len(sorted_epics) - 1:
             lines.append(f"{empty_filepath_str}\t")

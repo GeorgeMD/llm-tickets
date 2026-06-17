@@ -329,11 +329,22 @@ def tree(interactive):
         return
 
     tickets_by_epic = {}
+    steps_by_ticket = {}
     for epic_id in epics:
-        tickets_by_epic[epic_id] = store.load_tickets(root, epic_id)
+        tickets = store.load_tickets(root, epic_id)
+        tickets_by_epic[epic_id] = tickets
+        for tid in tickets:
+            try:
+                content = store.read_ticket(root, epic_id, tid)
+                steps = store.parse_steps(content)
+                if steps:
+                    steps_by_ticket[tid] = steps
+            except Exception:
+                pass  # Silently ignore parse failures
 
     if interactive:
-        utils.run_interactive_tree(root, epics, tickets_by_epic)
+        utils.run_interactive_tree(root, epics, tickets_by_epic, steps_by_ticket)
     else:
-        output = utils.format_tree(epics, tickets_by_epic)
+        output = utils.format_tree(epics, tickets_by_epic, steps_by_ticket)
         click.echo(output)
+

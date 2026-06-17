@@ -94,6 +94,48 @@ The `ticket edit` command supports three input modes:
 3. **Editor**: If no text is provided, opens `$EDITOR` (or `$VISUAL`,
    falling back to `notepad` on Windows / `vi` on Unix)
 
+## Task Tracking
+
+Tickets can contain a `# Steps` section to track individual tasks. Each
+`##` heading under `# Steps` is treated as a task. Prefix a heading with
+✅ to mark it as done. `ltk tree` renders tasks with `[x]`/`[ ]`
+checkboxes automatically.
+
+```markdown
+# My Ticket
+
+Description of the work.
+
+# Steps
+
+## Set up the database schema
+
+Create the tables and indexes.
+
+### Tables
+
+- users
+- sessions
+
+## ✅ Write migration scripts
+
+Already done.
+
+## Add API endpoints
+
+Implement REST endpoints for CRUD.
+```
+
+Tree output:
+```
+[Epic] Backend [epic-a1b2c3]
+   `-- c3-x9y8z7  [open] My Ticket
+       [ ] Set up the database schema
+       [x] Write migration scripts
+       [ ] Add API endpoints
+```
+
+
 ## Data Layout
 
 ```

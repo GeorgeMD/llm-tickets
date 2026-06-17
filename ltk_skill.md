@@ -128,7 +128,47 @@ echo -e "## Requirements\n- Verify passwords using bcrypt\n- Return JWT token on
   # This automatically unblocks <ticket 2 id>, transitioning its status from [blocked] to [open].
   ```
 
-### 6. Troubleshooting Cycles
+### 6. Task Tracking with Steps
+
+Break each ticket into concrete tasks using a `# Steps` section in the ticket
+markdown. Each `##` heading under `# Steps` is a task. Prefix a heading with
+✅ to mark it as done. `ltk tree` will render tasks with `[x]`/`[ ]` checkboxes.
+
+When editing a ticket, structure it like this:
+
+```bash
+ltk ticket edit <ticket id> "# Ticket Title
+
+Description of the work to be done.
+
+# Steps
+
+## First task
+
+Details about the first task.
+
+## ✅ Second task (already done)
+
+Details about the second task.
+
+## Third task
+
+Details about the third task."
+```
+
+Each task can contain rich markdown (paragraphs, code blocks, lists, H3+
+sub-headings) under its `##` heading. `ltk tree` output will show:
+
+```
+[Epic] Backend [epic-a1b2c3]
+   `-- c3-x9y8z7  [open] Ticket Title
+       [ ] First task
+       [x] Second task (already done)
+       [ ] Third task
+```
+
+### 7. Troubleshooting Cycles
 
 If you encounter a `circular dependency` error, rethink the way you split the
 work accross tickets to break the cycle.
+
