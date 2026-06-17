@@ -350,7 +350,7 @@ def _open_file_in_editor(filepath: str) -> None:
     """Open an existing file in $EDITOR for direct editing."""
     editor = _get_editor()
     try:
-        subprocess.run([editor, filepath], check=True)
+        subprocess.run(f'{editor} "{filepath}"', shell=True, check=True)
     except subprocess.CalledProcessError:
         pass
 
@@ -371,7 +371,7 @@ def open_editor(initial_content: str = "") -> Optional[str]:
         tmp_path = tmp.name
 
     try:
-        subprocess.run([editor, tmp_path], check=True)
+        subprocess.run(f'{editor} "{tmp_path}"', shell=True, check=True)
         with open(tmp_path, "r", encoding="utf-8") as fh:
             content = fh.read()
         return content
@@ -382,3 +382,4 @@ def open_editor(initial_content: str = "") -> Optional[str]:
             os.unlink(tmp_path)
         except OSError:
             pass
+
