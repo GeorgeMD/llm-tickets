@@ -37,3 +37,5 @@ pythonvenv/
 *.swo
 .DS_Store
 Thumbs.db
+
+.tickets
