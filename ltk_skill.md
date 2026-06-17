@@ -1,14 +1,10 @@
-# Agent Skill: ltk (LLM Ticket Keeping)
+---
+name: ltk
+description: Manage your work broken down in epics, tickets and tasks using the "ltk" command line tool.
+---
 
-This skill enables an AI agent to use the `ltk` command-line tool to manage,
-track, and coordinate tasks, epics, and dependencies locally within a project.
+# ltk (LLM Ticket Keeping)
 
-## Agent System Prompt Integration
-
-Copy and paste this section into the agent's system prompt to enable `ltk`
-capability:
-
-```markdown
 You have access to the `ltk` command-line tool for ticket and dependency
 tracking. Use `ltk` to manage your goals, epics, and tasks. Always verify if a
 ticket exists before starting work, update ticket content as you make progress,
@@ -24,31 +20,34 @@ Core guidelines for using `ltk`:
 4. Ask the user before closing tickets to ensure they are finished before moving
    on, unless the user specifically mentions you can close tickets
    automatically: `ltk ticket close <id>`.
-5. When linking tickets together, the tool checks for circular dependencies.
-```
+5. Tickets that depend on each other should be linked with `ltk dep add` in
+   order to keep track of what can be worked on next.
+6. When linking tickets together, the tool checks for circular dependencies.
+7. You should update the ticket markdown file when a task is complete to keep
+   track of the progress of a ticket.
 
 ---
 
 ## Command Reference
 
-| Command            | Usage                                          | Description                                                         |
-| :----------------- | :--------------------------------------------- | :------------------------------------------------------------------ |
-| **init**           | `ltk init .`                                   | Initializes a `.tickets/` store in the project root.                |
-| **epic create**    | `ltk epic create "<name>"`                     | Creates a new epic. Returns the `epic-xxxxxx` ID.                   |
-| **epic list**      | `ltk epic list`                                | Lists all epics and the number of tickets in each.                  |
-| **epic rename**    | `ltk epic rename <epic> "<new_name>"`          | Renames an epic.                                                    |
-| **epic delete**    | `ltk epic delete <epic>`                       | Deletes an epic and all of its tickets (requires confirmation).     |
-| **ticket create**  | `ltk ticket create <epic> "<name>"`            | Creates a ticket in an epic. Returns the `xx-xxxxxx` ID.            |
-| **ticket list**    | `ltk ticket list <epic>`                       | Lists all tickets for a specific epic in a table view.              |
-| **ticket edit**    | `ltk ticket edit <ticket> "<markdown>"`        | Overwrites a ticket's `.md` file content with description.          |
-| **dep add**        | `ltk dep add <ticket> <dep_tickets...>`        | Marks a ticket as dependent on others (within the same epic).       |
-| **dep rm**         | `ltk dep rm <ticket> <dep_tickets...>`         | Removes dependency relationships between tickets.                   |
-| **ticket rename**  | `ltk ticket rename <ticket> "<new_name>"`      | Renames a ticket.                                                   |
-| **ticket close**   | `ltk ticket close <ticket>`                    | Closes a ticket, automatically unblocking dependent tickets.        |
-| **ticket start**   | `ltk ticket start <ticket>`                    | Marks a ticket as in progress.                                     |
-| **ticket delete**  | `ltk ticket delete <ticket>`                   | Deletes a ticket and removes it from all dependency lists.          |
-| **tree**           | `ltk tree`                                     | Displays the hierarchical tree of epics, tickets, and dependencies. |
-| **tree -i**        | `ltk tree -i`                                  | Opens the interactive terminal browser using `fzf` and `glow`.      |
+| Command           | Usage                                     | Description                                                         |
+| :---------------- | :---------------------------------------- | :------------------------------------------------------------------ |
+| **init**          | `ltk init .`                              | Initializes a `.tickets/` store in the project root.                |
+| **epic create**   | `ltk epic create "<name>"`                | Creates a new epic. Returns the `epic-xxxxxx` ID.                   |
+| **epic list**     | `ltk epic list`                           | Lists all epics and the number of tickets in each.                  |
+| **epic rename**   | `ltk epic rename <epic> "<new_name>"`     | Renames an epic.                                                    |
+| **epic delete**   | `ltk epic delete <epic>`                  | Deletes an epic and all of its tickets (requires confirmation).     |
+| **ticket create** | `ltk ticket create <epic> "<name>"`       | Creates a ticket in an epic. Returns the `xx-xxxxxx` ID.            |
+| **ticket list**   | `ltk ticket list <epic>`                  | Lists all tickets for a specific epic in a table view.              |
+| **ticket edit**   | `ltk ticket edit <ticket> "<markdown>"`   | Overwrites a ticket's `.md` file content with description.          |
+| **dep add**       | `ltk dep add <ticket> <dep_tickets...>`   | Marks a ticket as dependent on others (within the same epic).       |
+| **dep rm**        | `ltk dep rm <ticket> <dep_tickets...>`    | Removes dependency relationships between tickets.                   |
+| **ticket rename** | `ltk ticket rename <ticket> "<new_name>"` | Renames a ticket.                                                   |
+| **ticket close**  | `ltk ticket close <ticket>`               | Closes a ticket, automatically unblocking dependent tickets.        |
+| **ticket start**  | `ltk ticket start <ticket>`               | Marks a ticket as in progress.                                      |
+| **ticket delete** | `ltk ticket delete <ticket>`              | Deletes a ticket and removes it from all dependency lists.          |
+| **tree**          | `ltk tree`                                | Displays the hierarchical tree of epics, tickets, and dependencies. |
+| **tree -i**       | `ltk tree -i`                             | Opens the interactive terminal browser using `fzf` and `glow`.      |
 
 ---
 
@@ -88,14 +87,14 @@ If a task requires another to be done first, declare the dependency:
 
 ```bash
 ltk dep add <ticket 2 id> <ticket 1 id>
-# Sets status of <ticket 2 id> to [blocked] because <ticket 1 id> is not yet closed.
+# Sets ticket 1 as a dependency of ticket 2. So ticket 2 will be marked as [blocked] until ticket 1 is closed.
 ```
 
 To remove a dependency:
 
 ```bash
 ltk dep rm <ticket 2 id> <ticket 1 id>
-# Removes the dependency of ticket 2 on ticket 1, unblocking ticket 2 if no other open dependencies remain.
+# Removes the dependency of ticket 2 on ticket 1. Only useful when you link 2 tickets by mistake.
 ```
 
 _Note: Dependencies are only supported within the same epic._
@@ -133,8 +132,8 @@ echo -e "## Requirements\n- Verify passwords using bcrypt\n- Return JWT token on
 ### 6. Task Tracking with Steps
 
 Break each ticket into concrete tasks using a `# Steps` section in the ticket
-markdown. Each `##` heading under `# Steps` is a task. Prefix a heading with
-✅ to mark it as done. `ltk tree` will render tasks with `[x]`/`[ ]` checkboxes.
+markdown. Each `##` heading under `# Steps` is a task. Prefix a heading with ✅
+to mark it as done. `ltk tree` will render tasks with `[x]`/`[ ]` checkboxes.
 
 When editing a ticket, structure it like this:
 
@@ -173,4 +172,3 @@ sub-headings) under its `##` heading. `ltk tree` output will show:
 
 If you encounter a `circular dependency` error, rethink the way you split the
 work accross tickets to break the cycle.
-
