@@ -315,7 +315,16 @@ def run_interactive_tree(
     ]
 
     try:
-        subprocess.run(fzf_cmd, input=input_text, text=True)
+        result = subprocess.run(
+            fzf_cmd, input=input_text, text=True, capture_output=True
+        )
+        selected = result.stdout.strip()
+        if selected:
+            # First tab-separated field is the filepath
+            filepath = selected.split("\t", 1)[0]
+            # Don't open the dummy .empty file (epic headers / separators)
+            if filepath and not filepath.endswith(".empty"):
+                _open_file_in_editor(filepath)
     except FileNotFoundError:
         raise FileNotFoundError(
             "fzf is required for interactive mode.\n"
@@ -328,17 +337,31 @@ def run_interactive_tree(
 # Editor support
 # ---------------------------------------------------------------------------
 
+def _get_editor() -> str:
+    """Return the user's preferred editor command."""
+    return (
+        os.environ.get("VISUAL")
+        or os.environ.get("EDITOR")
+        or ("notepad" if platform.system() == "Windows" else "vi")
+    )
+
+
+def _open_file_in_editor(filepath: str) -> None:
+    """Open an existing file in $EDITOR for direct editing."""
+    editor = _get_editor()
+    try:
+        subprocess.run([editor, filepath], check=True)
+    except subprocess.CalledProcessError:
+        pass
+
+
 def open_editor(initial_content: str = "") -> Optional[str]:
     """Open $EDITOR with *initial_content* and return the edited text.
 
     Falls back to notepad (Windows) or vi (Unix).
     Returns None if the user aborts (empty file).
     """
-    editor = (
-        os.environ.get("VISUAL")
-        or os.environ.get("EDITOR")
-        or ("notepad" if platform.system() == "Windows" else "vi")
-    )
+    editor = _get_editor()
 
     suffix = ".md"
     with tempfile.NamedTemporaryFile(
