@@ -291,6 +291,15 @@ def remove_dependencies(
         raise KeyError(f"Ticket '{ticket_id}' not found")
 
     current_deps = tickets[ticket_id].get("depends", [])
+
+    for dep_id in dep_ids:
+        if dep_id not in current_deps:
+            ticket_name = tickets[ticket_id]["name"]
+            dep_name = tickets[dep_id]["name"]
+            raise ValueError(
+                f"There is no dependency between '{ticket_name}' and '{dep_name}'"
+            )
+
     updated_deps = [d for d in current_deps if d not in dep_ids]
     tickets[ticket_id]["depends"] = updated_deps
 
@@ -305,6 +314,7 @@ def remove_dependencies(
             tickets[ticket_id]["status"] = "open"
 
     save_tickets(root, epic_id, tickets)
+
 
 
 
