@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ltk": {
+      "command": "ltk",
+      "args": [],
+      "env": {},
+      "alwaysAllow": [
+        "tree",
+        "epic list",
+        "ticket list"
+      ]
+    }
+  },
+  "comment": "To use this, add the 'ltk' entry to your Claude Desktop configuration file at %APPDATA%/Claude/claude_desktop_config.json (Windows) or ~/Library/Application Support/Claude/claude_desktop_config.json (macOS), ensuring 'ltk' is installed and globally available in your PATH."
+}
