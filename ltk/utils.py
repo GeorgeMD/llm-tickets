@@ -241,7 +241,7 @@ def run_interactive_tree(
             empty_filepath.touch(exist_ok=True)
         except Exception:
             pass
-        empty_filepath_str = str(empty_filepath)
+    empty_filepath_str = str(empty_filepath)
 
     show_dependencies = False
 
