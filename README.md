@@ -60,6 +60,7 @@ ltk ticket close c3-k4m5n6
 | `ltk ticket create <epic> <name>` | Create a ticket in an epic |
 | `ltk ticket list <epic>` | List tickets in an epic |
 | `ltk ticket edit <ticket> [text]` | Edit ticket content |
+| `ltk ticket show <ticket>` | Show ticket content |
 | `ltk ticket delete <ticket>` | Delete a ticket |
 | `ltk dep add <ticket> <deps...>` | Add dependencies |
 | `ltk dep rm <ticket> <deps...>` | Remove dependencies |

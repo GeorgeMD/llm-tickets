@@ -201,6 +201,17 @@ def ticket_edit(ticket_identifier, text):
     )
 
 
+@ticket.command("show")
+@click.argument("ticket_identifier")
+@_handle_error
+def ticket_show(ticket_identifier):
+    """Show the content of a ticket."""
+    root = store.require_root()
+    epic_id, ticket_id, meta = store.resolve_ticket(root, ticket_identifier)
+    content = store.read_ticket(root, epic_id, ticket_id)
+    click.echo(content, nl=False)
+
+
 @ticket.command("delete")
 @click.argument("ticket_identifier")
 @_handle_error

@@ -40,6 +40,7 @@ Core guidelines for using `ltk`:
 | **ticket create** | `ltk ticket create <epic> "<name>"`       | Creates a ticket in an epic. Returns the `xx-xxxxxx` ID.            |
 | **ticket list**   | `ltk ticket list <epic>`                  | Lists all tickets for a specific epic in a table view.              |
 | **ticket edit**   | `ltk ticket edit <ticket> "<markdown>"`   | Overwrites a ticket's `.md` file content with description.          |
+| **ticket show**   | `ltk ticket show <ticket>`               | Prints the markdown content of a ticket.                            |
 | **dep add**       | `ltk dep add <ticket> <dep_tickets...>`   | Marks a ticket as dependent on others (within the same epic).       |
 | **dep rm**        | `ltk dep rm <ticket> <dep_tickets...>`    | Removes dependency relationships between tickets.                   |
 | **ticket rename** | `ltk ticket rename <ticket> "<new_name>"` | Renames a ticket.                                                   |
