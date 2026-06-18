@@ -319,7 +319,7 @@ def run_interactive_tree(
             "--with-nth", "2..",
             "--preview", "glow -s dark {1}",
             "--preview-window", "right:60%:wrap:border-left",
-            "--header", "Tickets  |  arrows to navigate, type to filter, Esc to quit\n\n",
+            "--header", "Tickets  |  arrows to navigate, type to filter, Ctrl+R to refresh, Esc to quit\n\n",
             "--no-sort",
             "--reverse",
             "--border", "rounded",
@@ -327,15 +327,27 @@ def run_interactive_tree(
             "--padding", "1",
             "--prompt", "Filter> ",
             "--color", "header:italic:dim",
+            "--expect", "ctrl-r",
         ]
 
         try:
             result = subprocess.run(
                 fzf_cmd, input=input_text, text=True, capture_output=True
             )
-            selected = result.stdout.strip()
-            if not selected:
+            stdout = result.stdout
+            if not stdout:
                 break
+
+            out_lines = [line.strip() for line in stdout.split("\n") if line.strip()]
+            if not out_lines:
+                break
+
+            key_or_item = out_lines[0]
+            if key_or_item == "ctrl-r":
+                continue
+
+            # It's an item selection (Enter was pressed)
+            selected = key_or_item
             # First tab-separated field is the filepath
             filepath = selected.split("\t", 1)[0]
             # Don't open the dummy .empty file (epic headers / separators)
