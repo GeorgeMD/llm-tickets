@@ -101,7 +101,7 @@ The `ticket edit` command supports three input modes:
 Tickets can contain a `# Steps` section to track individual tasks. Each
 `##` heading under `# Steps` is treated as a task. Prefix a heading with
 ✅ to mark it as done. `ltk tree` renders tasks with `[x]`/`[ ]`
-checkboxes automatically.
+checkboxes automatically (only for tickets in the `open` status).
 
 ```markdown
 # My Ticket

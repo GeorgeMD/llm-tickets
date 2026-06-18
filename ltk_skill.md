@@ -134,7 +134,7 @@ echo -e "## Requirements\n- Verify passwords using bcrypt\n- Return JWT token on
 
 Break each ticket into concrete tasks using a `# Steps` section in the ticket
 markdown. Each `##` heading under `# Steps` is a task. Prefix a heading with ✅
-to mark it as done. `ltk tree` will render tasks with `[x]`/`[ ]` checkboxes.
+to mark it as done. `ltk tree` will render tasks with `[x]`/`[ ]` checkboxes (only for tickets in the `open` status).
 
 When editing a ticket, structure it like this:
 

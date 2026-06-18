@@ -166,15 +166,16 @@ def format_tree(
                     )
 
                 # Show steps (tasks)
-                ticket_steps = steps_by_ticket.get(tid, [])
-                for step in ticket_steps:
-                    if step["done"]:
-                        check = _c("\033[92m", "[x]")
-                        title = _c(_DIM, step["title"])
-                    else:
-                        check = _c(_DIM, "[ ]")
-                        title = step["title"]
-                    lines.append(f"{cont_prefix}{check} {title}")
+                if meta["status"] == "open":
+                    ticket_steps = steps_by_ticket.get(tid, [])
+                    for step in ticket_steps:
+                        if step["done"]:
+                            check = _c("\033[92m", "[x]")
+                            title = _c(_DIM, step["title"])
+                        else:
+                            check = _c(_DIM, "[ ]")
+                            title = step["title"]
+                        lines.append(f"{cont_prefix}{check} {title}")
 
         if idx < len(sorted_epics) - 1:
             lines.append("")  # blank separator between epics
@@ -240,7 +241,9 @@ def run_interactive_tree(
             empty_filepath.touch(exist_ok=True)
         except Exception:
             pass
-    empty_filepath_str = str(empty_filepath)
+        empty_filepath_str = str(empty_filepath)
+
+    show_dependencies = False
 
     while True:
         # Reload status and steps on each iteration
@@ -291,18 +294,35 @@ def run_interactive_tree(
                     display = f"{branch_ansi}{colored_label} {name_part} {tid_ansi}"
                     lines.append(f"{filepath}\t{display}")
 
-                    # Show steps (tasks) under the ticket
                     cont_prefix = "       " if is_last else "   |   "
-                    ticket_steps = steps_by_ticket.get(tid, [])
-                    for step in ticket_steps:
-                        if step["done"]:
-                            check = _raw_ansi("\033[92m", "[x]")
-                            title = _raw_ansi(_DIM, step["title"])
-                        else:
-                            check = _raw_ansi(_DIM, "[ ]")
-                            title = step["title"]
-                        step_display = f"{_raw_ansi(_DIM, cont_prefix)}{check} {title}"
-                        lines.append(f"{filepath}\t{step_display}")
+
+                    # Show dependencies (if toggled on)
+                    if show_dependencies:
+                        deps = meta.get("depends", [])
+                        if deps:
+                            dep_names = []
+                            for d in deps:
+                                if d in tickets:
+                                    dep_names.append(f"{d} ({tickets[d]['name']})")
+                                else:
+                                    dep_names.append(d)
+                            dep_str = f"{cont_prefix}-> depends on: {', '.join(dep_names)}"
+                            lines.append(
+                                f"{filepath}\t{_raw_ansi(_DIM, dep_str)}"
+                            )
+
+                    # Show steps (tasks) under the ticket (only for open tickets)
+                    if meta["status"] == "open":
+                        ticket_steps = steps_by_ticket.get(tid, [])
+                        for step in ticket_steps:
+                            if step["done"]:
+                                check = _raw_ansi("\033[92m", "[x]")
+                                title = _raw_ansi(_DIM, step["title"])
+                            else:
+                                check = _raw_ansi(_DIM, "[ ]")
+                                title = step["title"]
+                            step_display = f"{_raw_ansi(_DIM, cont_prefix)}{check} {title}"
+                            lines.append(f"{filepath}\t{step_display}")
             
             if idx < len(sorted_epics) - 1:
                 lines.append(f"{empty_filepath_str}\t")
@@ -319,7 +339,7 @@ def run_interactive_tree(
             "--with-nth", "2..",
             "--preview", "glow -s dark {1}",
             "--preview-window", "right:60%:wrap:border-left",
-            "--header", "Tickets  |  arrows to navigate, type to filter, Ctrl+R to refresh, Esc to quit\n\n",
+            "--header", "Tickets  |  arrows to navigate, type to filter, Ctrl+R to refresh, Ctrl+D to toggle deps, Esc to quit\n\n",
             "--no-sort",
             "--reverse",
             "--border", "rounded",
@@ -327,7 +347,7 @@ def run_interactive_tree(
             "--padding", "1",
             "--prompt", "Filter> ",
             "--color", "header:italic:dim",
-            "--expect", "ctrl-r",
+            "--expect", "ctrl-r,ctrl-d",
         ]
 
         try:
@@ -344,6 +364,9 @@ def run_interactive_tree(
 
             key_or_item = out_lines[0]
             if key_or_item == "ctrl-r":
+                continue
+            if key_or_item == "ctrl-d":
+                show_dependencies = not show_dependencies
                 continue
 
             # It's an item selection (Enter was pressed)
