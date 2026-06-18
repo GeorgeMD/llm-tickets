@@ -231,9 +231,7 @@ def run_interactive_tree(
 ) -> None:
     """Launch fzf with glow preview for interactive ticket browsing."""
     from pathlib import Path as _P
-
-    if steps_by_ticket is None:
-        steps_by_ticket = {}
+    from ltk import store
 
     # Create an empty file in .tickets/.empty for epic headers/separators preview
     empty_filepath = root / ".empty"
@@ -244,93 +242,111 @@ def run_interactive_tree(
             pass
     empty_filepath_str = str(empty_filepath)
 
-    lines: List[str] = []
-    sorted_epics = sorted(epics.items(), key=lambda x: x[1].lower())
+    while True:
+        # Reload status and steps on each iteration
+        epics = store.load_epics(root)
+        tickets_by_epic = {}
+        steps_by_ticket = {}
+        for epic_id in epics:
+            tickets = store.load_tickets(root, epic_id)
+            tickets_by_epic[epic_id] = tickets
+            for tid in tickets:
+                try:
+                    content = store.read_ticket(root, epic_id, tid)
+                    steps = store.parse_steps(content)
+                    if steps:
+                        steps_by_ticket[tid] = steps
+                except Exception:
+                    pass  # Silently ignore parse failures
 
-    for idx, (epic_id, epic_name) in enumerate(sorted_epics):
-        tickets = tickets_by_epic.get(epic_id, {})
-        
-        # Add epic header line
-        epic_header_display = _raw_ansi(_BOLD, f"[Epic] {epic_name}") + _raw_ansi(_DIM, f" [{epic_id}]")
-        lines.append(f"{empty_filepath_str}\t{epic_header_display}")
+        lines: List[str] = []
+        sorted_epics = sorted(epics.items(), key=lambda x: x[1].lower())
 
-        if not tickets:
-            no_tickets_display = _raw_ansi(_DIM, "   (no tickets)")
-            lines.append(f"{empty_filepath_str}\t{no_tickets_display}")
-        else:
-            ordered = topological_sort(tickets)
-            for i, tid in enumerate(ordered):
-                meta = tickets[tid]
-                filepath = str(_P(root / epic_id / f"{tid}.md"))
-                is_last = i == len(ordered) - 1
-                branch = "`-- " if is_last else "|-- "
-                label, colour = _STATUS_STYLE.get(
-                    meta["status"], ("[?]", "")
-                )
-                colored_label = _raw_ansi(colour, label)
-                name_part = meta["name"]
-                
-                # Format: branch + colored_label + name_part + (tid)
-                branch_ansi = _raw_ansi(_DIM, f"   {branch}")
-                tid_ansi = _raw_ansi(_DIM, f"({tid})")
-                display = f"{branch_ansi}{colored_label} {name_part} {tid_ansi}"
-                lines.append(f"{filepath}\t{display}")
+        for idx, (epic_id, epic_name) in enumerate(sorted_epics):
+            tickets = tickets_by_epic.get(epic_id, {})
+            
+            # Add epic header line
+            epic_header_display = _raw_ansi(_BOLD, f"[Epic] {epic_name}") + _raw_ansi(_DIM, f" [{epic_id}]")
+            lines.append(f"{empty_filepath_str}\t{epic_header_display}")
 
-                # Show steps (tasks) under the ticket
-                cont_prefix = "       " if is_last else "   |   "
-                ticket_steps = steps_by_ticket.get(tid, [])
-                for step in ticket_steps:
-                    if step["done"]:
-                        check = _raw_ansi("\033[92m", "[x]")
-                        title = _raw_ansi(_DIM, step["title"])
-                    else:
-                        check = _raw_ansi(_DIM, "[ ]")
-                        title = step["title"]
-                    step_display = f"{_raw_ansi(_DIM, cont_prefix)}{check} {title}"
-                    lines.append(f"{filepath}\t{step_display}")
-        
-        if idx < len(sorted_epics) - 1:
-            lines.append(f"{empty_filepath_str}\t")
+            if not tickets:
+                no_tickets_display = _raw_ansi(_DIM, "   (no tickets)")
+                lines.append(f"{empty_filepath_str}\t{no_tickets_display}")
+            else:
+                ordered = topological_sort(tickets)
+                for i, tid in enumerate(ordered):
+                    meta = tickets[tid]
+                    filepath = str(_P(root / epic_id / f"{tid}.md"))
+                    is_last = i == len(ordered) - 1
+                    branch = "`-- " if is_last else "|-- "
+                    label, colour = _STATUS_STYLE.get(
+                        meta["status"], ("[?]", "")
+                    )
+                    colored_label = _raw_ansi(colour, label)
+                    name_part = meta["name"]
+                    
+                    # Format: branch + colored_label + name_part + (tid)
+                    branch_ansi = _raw_ansi(_DIM, f"   {branch}")
+                    tid_ansi = _raw_ansi(_DIM, f"({tid})")
+                    display = f"{branch_ansi}{colored_label} {name_part} {tid_ansi}"
+                    lines.append(f"{filepath}\t{display}")
 
-    if not lines:
-        return
+                    # Show steps (tasks) under the ticket
+                    cont_prefix = "       " if is_last else "   |   "
+                    ticket_steps = steps_by_ticket.get(tid, [])
+                    for step in ticket_steps:
+                        if step["done"]:
+                            check = _raw_ansi("\033[92m", "[x]")
+                            title = _raw_ansi(_DIM, step["title"])
+                        else:
+                            check = _raw_ansi(_DIM, "[ ]")
+                            title = step["title"]
+                        step_display = f"{_raw_ansi(_DIM, cont_prefix)}{check} {title}"
+                        lines.append(f"{filepath}\t{step_display}")
+            
+            if idx < len(sorted_epics) - 1:
+                lines.append(f"{empty_filepath_str}\t")
 
-    input_text = "\n".join(lines)
+        if not lines:
+            break
 
-    fzf_cmd = [
-        "fzf",
-        "--ansi",
-        "--delimiter", "\t",
-        "--with-nth", "2..",
-        "--preview", "glow -s dark {1}",
-        "--preview-window", "right:60%:wrap:border-left",
-        "--header", "Tickets  |  arrows to navigate, type to filter, Esc to quit\n\n",
-        "--no-sort",
-        "--reverse",
-        "--border", "rounded",
-        "--margin", "1,2",
-        "--padding", "1",
-        "--prompt", "Filter> ",
-        "--color", "header:italic:dim",
-    ]
+        input_text = "\n".join(lines)
 
-    try:
-        result = subprocess.run(
-            fzf_cmd, input=input_text, text=True, capture_output=True
-        )
-        selected = result.stdout.strip()
-        if selected:
+        fzf_cmd = [
+            "fzf",
+            "--ansi",
+            "--delimiter", "\t",
+            "--with-nth", "2..",
+            "--preview", "glow -s dark {1}",
+            "--preview-window", "right:60%:wrap:border-left",
+            "--header", "Tickets  |  arrows to navigate, type to filter, Esc to quit\n\n",
+            "--no-sort",
+            "--reverse",
+            "--border", "rounded",
+            "--margin", "1,2",
+            "--padding", "1",
+            "--prompt", "Filter> ",
+            "--color", "header:italic:dim",
+        ]
+
+        try:
+            result = subprocess.run(
+                fzf_cmd, input=input_text, text=True, capture_output=True
+            )
+            selected = result.stdout.strip()
+            if not selected:
+                break
             # First tab-separated field is the filepath
             filepath = selected.split("\t", 1)[0]
             # Don't open the dummy .empty file (epic headers / separators)
             if filepath and not filepath.endswith(".empty"):
                 _open_file_in_editor(filepath)
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            "fzf is required for interactive mode.\n"
-            "Install it: https://github.com/junegunn/fzf#installation\n"
-            "Also install glow for preview: https://github.com/charmbracelet/glow"
-        )
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "fzf is required for interactive mode.\n"
+                "Install it: https://github.com/junegunn/fzf#installation\n"
+                "Also install glow for preview: https://github.com/charmbracelet/glow"
+            )
 
 
 # ---------------------------------------------------------------------------
