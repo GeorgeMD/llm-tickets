@@ -58,13 +58,47 @@ def init_project(project_root: Path) -> Path:
 # Epic helpers
 # ---------------------------------------------------------------------------
 
-def load_epics(root: Path) -> Dict[str, str]:
-    """Return {epic_id: epic_name} mapping."""
-    return _load_json(root / EPICS_FILE)
+def load_epics(root: Path) -> Dict[str, Dict[str, Any]]:
+    """Return {epic_id: epic_meta} mapping (with migration/normalization)."""
+    data = _load_json(root / EPICS_FILE)
+    migrated = False
+    for eid, value in list(data.items()):
+        if isinstance(value, str):
+            data[eid] = {
+                "name": value,
+                "parent": None,
+                "status": "open",
+                "depends": []
+            }
+            migrated = True
+        else:
+            if "parent" not in value:
+                value["parent"] = None
+                migrated = True
+            if "status" not in value:
+                value["status"] = "open"
+                migrated = True
+            if "depends" not in value:
+                value["depends"] = []
+                migrated = True
+    if migrated:
+        save_epics(root, data)
+    return data
 
 
-def save_epics(root: Path, data: Dict[str, str]) -> None:
+def save_epics(root: Path, data: Dict[str, Dict[str, Any]]) -> None:
     _save_json(root / EPICS_FILE, data)
+
+
+def get_epic_path(root: Path, epic_id: str, epics_registry: Dict[str, Any]) -> Path:
+    """Return the physical Path of an epic by traversing its parent chain."""
+    parts = []
+    curr = epic_id
+    while curr:
+        parts.append(curr)
+        curr = epics_registry.get(curr, {}).get("parent")
+    parts.reverse()
+    return root.joinpath(*parts)
 
 
 def generate_epic_id(existing_ids: set) -> str:
@@ -76,40 +110,70 @@ def generate_epic_id(existing_ids: set) -> str:
     raise RuntimeError("Failed to generate a unique epic ID")
 
 
-def create_epic(root: Path, name: str) -> str:
+def create_epic(root: Path, name: str, parent_id: Optional[str] = None) -> str:
     """Create a new epic folder and register it.  Returns the epic_id."""
     epics = load_epics(root)
+    if parent_id and parent_id not in epics:
+        raise KeyError(f"Parent epic '{parent_id}' not found")
+        
     epic_id = generate_epic_id(set(epics.keys()))
-    epics[epic_id] = name
+    epics[epic_id] = {
+        "name": name,
+        "parent": parent_id,
+        "status": "open",
+        "depends": []
+    }
     save_epics(root, epics)
-    epic_dir = root / epic_id
-    epic_dir.mkdir()
+    
+    epic_dir = get_epic_path(root, epic_id, epics)
+    epic_dir.mkdir(parents=True, exist_ok=True)
     _save_json(epic_dir / TICKETS_FILE, {})
     return epic_id
 
 
 def delete_epic(root: Path, epic_id: str) -> None:
-    """Remove an epic folder and its registry entry."""
+    """Remove an epic folder recursively and its registry entries."""
     epics = load_epics(root)
     if epic_id not in epics:
         raise KeyError(f"Epic '{epic_id}' not found")
-    epic_dir = root / epic_id
+        
+    # Find all descendants recursively
+    to_delete = [epic_id]
+    queue = [epic_id]
+    while queue:
+        curr = queue.pop(0)
+        children = [eid for eid, meta in epics.items() if meta.get("parent") == curr]
+        to_delete.extend(children)
+        queue.extend(children)
+        
+    epic_dir = get_epic_path(root, epic_id, epics)
+    
+    # Remove from other epics' dependency lists
+    for meta in epics.values():
+        deps = meta.get("depends", [])
+        if epic_id in deps:
+            deps.remove(epic_id)
+            
+    for eid in to_delete:
+        if eid in epics:
+            del epics[eid]
+            
+    save_epics(root, epics)
+    
     if epic_dir.exists():
         shutil.rmtree(epic_dir)
-    del epics[epic_id]
-    save_epics(root, epics)
 
 
 def rename_epic(root: Path, epic_id: str, new_name: str) -> None:
     epics = load_epics(root)
     if epic_id not in epics:
         raise KeyError(f"Epic '{epic_id}' not found")
-    epics[epic_id] = new_name
+    epics[epic_id]["name"] = new_name
     save_epics(root, epics)
 
 
-def resolve_epic(root: Path, identifier: str) -> Tuple[str, str]:
-    """Resolve an epic by full ID, ID prefix, or name.  Returns (id, name)."""
+def resolve_epic(root: Path, identifier: str) -> Tuple[str, Dict[str, Any]]:
+    """Resolve an epic by full ID, ID prefix, or name.  Returns (id, meta)."""
     epics = load_epics(root)
 
     # exact id
@@ -118,7 +182,7 @@ def resolve_epic(root: Path, identifier: str) -> Tuple[str, str]:
 
     # prefix match on id
     matches = [
-        (eid, name) for eid, name in epics.items()
+        (eid, meta) for eid, meta in epics.items()
         if eid.startswith(identifier)
     ]
     if len(matches) == 1:
@@ -131,8 +195,8 @@ def resolve_epic(root: Path, identifier: str) -> Tuple[str, str]:
 
     # name match (case-insensitive)
     matches = [
-        (eid, name) for eid, name in epics.items()
-        if name.lower() == identifier.lower()
+        (eid, meta) for eid, meta in epics.items()
+        if meta["name"].lower() == identifier.lower()
     ]
     if len(matches) == 1:
         return matches[0]
@@ -151,13 +215,17 @@ def resolve_epic(root: Path, identifier: str) -> Tuple[str, str]:
 
 def load_tickets(root: Path, epic_id: str) -> Dict[str, Dict[str, Any]]:
     """Return {ticket_id: {name, status, depends}} for an epic."""
-    return _load_json(root / epic_id / TICKETS_FILE)
+    epics = load_epics(root)
+    epic_dir = get_epic_path(root, epic_id, epics)
+    return _load_json(epic_dir / TICKETS_FILE)
 
 
 def save_tickets(
     root: Path, epic_id: str, data: Dict[str, Dict[str, Any]]
 ) -> None:
-    _save_json(root / epic_id / TICKETS_FILE, data)
+    epics = load_epics(root)
+    epic_dir = get_epic_path(root, epic_id, epics)
+    _save_json(epic_dir / TICKETS_FILE, data)
 
 
 def generate_ticket_id(epic_id: str, existing_ids: set) -> str:
@@ -183,7 +251,8 @@ def create_ticket(root: Path, epic_id: str, name: str) -> str:
         "depends": [],
     }
     save_tickets(root, epic_id, tickets)
-    ticket_path = root / epic_id / f"{ticket_id}.md"
+    epic_dir = get_epic_path(root, epic_id, epics)
+    ticket_path = epic_dir / f"{ticket_id}.md"
     ticket_path.write_text(f"# {name}\n", encoding="utf-8")
     return ticket_id
 
@@ -203,7 +272,9 @@ def delete_ticket(root: Path, epic_id: str, ticket_id: str) -> None:
     del tickets[ticket_id]
     save_tickets(root, epic_id, tickets)
 
-    ticket_path = root / epic_id / f"{ticket_id}.md"
+    epics = load_epics(root)
+    epic_dir = get_epic_path(root, epic_id, epics)
+    ticket_path = epic_dir / f"{ticket_id}.md"
     if ticket_path.exists():
         ticket_path.unlink()
 
@@ -225,12 +296,16 @@ def edit_ticket(
     tickets = load_tickets(root, epic_id)
     if ticket_id not in tickets:
         raise KeyError(f"Ticket '{ticket_id}' not found")
-    ticket_path = root / epic_id / f"{ticket_id}.md"
+    epics = load_epics(root)
+    epic_dir = get_epic_path(root, epic_id, epics)
+    ticket_path = epic_dir / f"{ticket_id}.md"
     ticket_path.write_text(content, encoding="utf-8")
 
 
 def read_ticket(root: Path, epic_id: str, ticket_id: str) -> str:
-    ticket_path = root / epic_id / f"{ticket_id}.md"
+    epics = load_epics(root)
+    epic_dir = get_epic_path(root, epic_id, epics)
+    ticket_path = epic_dir / f"{ticket_id}.md"
     if not ticket_path.exists():
         raise FileNotFoundError(f"Ticket file not found: {ticket_path}")
     return ticket_path.read_text(encoding="utf-8")
@@ -391,6 +466,32 @@ def close_ticket(
     return unblocked
 
 
+def get_effective_epic_status(root: Path, epic_id: str, epics: Dict[str, Any]) -> str:
+    """Return the effective status of an epic, taking parent status into account."""
+    meta = epics[epic_id]
+    if meta["status"] == "closed":
+        return "closed"
+        
+    curr = meta
+    while curr:
+        if curr["status"] == "blocked":
+            return "blocked"
+        parent_id = curr.get("parent")
+        curr = epics.get(parent_id) if parent_id else None
+        
+    return meta["status"]
+
+
+def get_effective_ticket_status(root: Path, epic_id: str, ticket_meta: Dict[str, Any], epics: Dict[str, Any]) -> str:
+    """Return the effective status of a ticket, taking epic status into account."""
+    if ticket_meta["status"] == "closed":
+        return "closed"
+    epic_status = get_effective_epic_status(root, epic_id, epics)
+    if epic_status == "blocked":
+        return "blocked"
+    return ticket_meta["status"]
+
+
 def start_ticket(root: Path, epic_id: str, ticket_id: str) -> bool:
     """Mark a ticket as in progress.
 
@@ -401,17 +502,154 @@ def start_ticket(root: Path, epic_id: str, ticket_id: str) -> bool:
     if ticket_id not in tickets:
         raise KeyError(f"Ticket '{ticket_id}' not found")
 
-    status = tickets[ticket_id].get("status", "open")
+    epics = load_epics(root)
+    status = get_effective_ticket_status(root, epic_id, tickets[ticket_id], epics)
     if status == "blocked":
         raise ValueError(f"Ticket '{ticket_id}' is blocked")
     if status == "closed":
         raise ValueError(f"Ticket '{ticket_id}' is closed")
-    if status == "in_progress":
+    if tickets[ticket_id]["status"] == "in_progress":
         return False
 
     tickets[ticket_id]["status"] = "in_progress"
     save_tickets(root, epic_id, tickets)
     return True
+
+
+def start_epic(root: Path, epic_id: str) -> bool:
+    """Mark an epic as in progress.
+
+    Returns True if the status was changed, or False if it was already in progress.
+    Raises ValueError if the epic is blocked, closed, or in another invalid state.
+    """
+    epics = load_epics(root)
+    if epic_id not in epics:
+        raise KeyError(f"Epic '{epic_id}' not found")
+
+    eff_status = get_effective_epic_status(root, epic_id, epics)
+    if eff_status == "blocked":
+        raise ValueError(f"Epic '{epic_id}' is blocked")
+    if eff_status == "closed":
+        raise ValueError(f"Epic '{epic_id}' is closed")
+    if epics[epic_id]["status"] == "in_progress":
+        return False
+
+    epics[epic_id]["status"] = "in_progress"
+    save_epics(root, epics)
+    return True
+
+
+def close_epic(root: Path, epic_id: str) -> List[str]:
+    """Close an epic and unblock dependent sibling epics.
+
+    Returns a list of sibling epic IDs that were unblocked.
+    """
+    epics = load_epics(root)
+    if epic_id not in epics:
+        raise KeyError(f"Epic '{epic_id}' not found")
+
+    epics[epic_id]["status"] = "closed"
+
+    parent_id = epics[epic_id].get("parent")
+    siblings = {eid: meta for eid, meta in epics.items() if meta.get("parent") == parent_id}
+
+    unblocked: List[str] = []
+    for eid, meta in siblings.items():
+        if eid == epic_id:
+            continue
+        if meta["status"] != "blocked":
+            continue
+        if epic_id not in meta.get("depends", []):
+            continue
+            
+        all_closed = all(
+            epics.get(d, {}).get("status") == "closed"
+            for d in meta["depends"]
+        )
+        if all_closed:
+            meta["status"] = "open"
+            unblocked.append(eid)
+
+    save_epics(root, epics)
+    return unblocked
+
+
+def add_epic_dependencies(
+    root: Path,
+    epic_id: str,
+    dep_ids: List[str],
+) -> None:
+    """Add dependency edges between sibling epics. Validates and detects cycles."""
+    from ltk.utils import would_create_cycle  # deferred to avoid circular import
+
+    epics = load_epics(root)
+    if epic_id not in epics:
+        raise KeyError(f"Epic '{epic_id}' not found")
+
+    parent_id = epics[epic_id].get("parent")
+    for dep_id in dep_ids:
+        if dep_id not in epics:
+            raise KeyError(f"Dependency epic '{dep_id}' not found")
+        if epics[dep_id].get("parent") != parent_id:
+            raise ValueError("Epics can only depend on other epics at the same level")
+        if dep_id == epic_id:
+            raise ValueError("An epic cannot depend on itself")
+
+    # Cycle check
+    for dep_id in dep_ids:
+        if would_create_cycle(epics, epic_id, dep_id):
+            raise ValueError(
+                f"Adding dependency {epic_id} -> {dep_id} would create "
+                f"a circular dependency"
+            )
+
+    current_deps = set(epics[epic_id].get("depends", []))
+    epics[epic_id]["depends"] = list(current_deps | set(dep_ids))
+
+    # Set status to blocked if any dependency is not closed
+    has_open_dep = any(
+        epics[d]["status"] != "closed"
+        for d in epics[epic_id]["depends"]
+    )
+    if has_open_dep:
+        epics[epic_id]["status"] = "blocked"
+
+    save_epics(root, epics)
+
+
+def remove_epic_dependencies(
+    root: Path,
+    epic_id: str,
+    dep_ids: List[str],
+) -> None:
+    """Remove dependency edges between sibling epics."""
+    epics = load_epics(root)
+    if epic_id not in epics:
+        raise KeyError(f"Epic '{epic_id}' not found")
+
+    current_deps = epics[epic_id].get("depends", [])
+
+    for dep_id in dep_ids:
+        if dep_id not in current_deps:
+            epic_name = epics[epic_id]["name"]
+            dep_name = epics[dep_id]["name"]
+            raise ValueError(
+                f"There is no dependency: '{epic_name}' -> '{dep_name}'"
+            )
+
+    updated_deps = [d for d in current_deps if d not in dep_ids]
+    epics[epic_id]["depends"] = updated_deps
+
+    if epics[epic_id]["status"] == "blocked":
+        has_open_dep = any(
+            epics[d]["status"] != "closed"
+            for d in epics[epic_id]["depends"]
+            if d in epics
+        )
+        if not has_open_dep:
+            epics[epic_id]["status"] = "open"
+
+    save_epics(root, epics)
 
 
 def resolve_ticket(

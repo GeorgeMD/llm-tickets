@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 from collections import deque
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -37,18 +37,27 @@ def would_create_cycle(
     return False
 
 
+def get_status_priority(status: str) -> int:
+    if status == "in_progress":
+        return 0
+    if status == "open":
+        return 1
+    if status == "blocked":
+        return 2
+    if status == "closed":
+        return 3
+    return 4
+
+
 # ---------------------------------------------------------------------------
 # Topological sort (Kahn's algorithm)
 # ---------------------------------------------------------------------------
 
 def topological_sort(
     tickets: Dict[str, Dict[str, Any]],
+    key = None
 ) -> List[str]:
-    """Return ticket IDs in topological order (no-dependency tickets first).
-
-    Tickets whose dependencies are not in *tickets* are treated as having
-    no dependency on that missing ticket.
-    """
+    """Return ticket IDs in topological order, prioritized by key if provided."""
     # Build in-degree map (only count deps that exist in tickets)
     in_degree: Dict[str, int] = {tid: 0 for tid in tickets}
     adj: Dict[str, List[str]] = {tid: [] for tid in tickets}  # dep -> dependents
@@ -59,21 +68,24 @@ def topological_sort(
                 in_degree[tid] += 1
                 adj[dep].append(tid)
 
-    queue: deque[str] = deque(
-        tid for tid, deg in in_degree.items() if deg == 0
-    )
+    # Use a list so we can sort by priority at each step
+    ready = [tid for tid, deg in in_degree.items() if deg == 0]
     result: List[str] = []
 
-    while queue:
-        node = queue.popleft()
+    while ready:
+        if key:
+            ready.sort(key=key)
+        node = ready.pop(0)
         result.append(node)
         for dependent in adj[node]:
             in_degree[dependent] -= 1
             if in_degree[dependent] == 0:
-                queue.append(dependent)
+                ready.append(dependent)
 
     # If there are remaining nodes they form a cycle — append them anyway
     remaining = [tid for tid in tickets if tid not in result]
+    if key:
+        remaining.sort(key=key)
     result.extend(remaining)
     return result
 
@@ -113,7 +125,8 @@ def _c(code: str, text: str) -> str:
 
 
 def format_tree(
-    epics: Dict[str, str],
+    root: "Path",
+    epics: Dict[str, Dict[str, Any]],
     tickets_by_epic: Dict[str, Dict[str, Dict[str, Any]]],
     steps_by_ticket: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
@@ -125,61 +138,119 @@ def format_tree(
     if steps_by_ticket is None:
         steps_by_ticket = {}
 
-    lines: List[str] = []
-    sorted_epics = sorted(epics.items(), key=lambda x: x[1].lower())
+    from ltk.store import get_effective_epic_status, get_effective_ticket_status
 
-    for idx, (epic_id, epic_name) in enumerate(sorted_epics):
-        tickets = tickets_by_epic.get(epic_id, {})
-        lines.append(
-            _c(_BOLD, f"[Epic] {epic_name}") + _c(_DIM, f" [{epic_id}]")
-        )
+    def sort_siblings(sibling_dict: Dict[str, Dict[str, Any]]) -> List[str]:
+        def key_func(eid):
+            meta = sibling_dict[eid]
+            eff_status = get_effective_epic_status(root, eid, epics)
+            return (get_status_priority(eff_status), meta["name"].lower())
+        return topological_sort(sibling_dict, key=key_func)
 
-        if not tickets:
-            lines.append(_c(_DIM, "   (no tickets)"))
+    def sort_tickets(tickets_dict: Dict[str, Dict[str, Any]], epic_id: str) -> List[str]:
+        def key_func(tid):
+            meta = tickets_dict[tid]
+            eff_status = get_effective_ticket_status(root, epic_id, meta, epics)
+            has_deps = 1 if meta.get("depends") else 0
+            return (get_status_priority(eff_status), has_deps, meta["name"].lower())
+        return topological_sort(tickets_dict, key=key_func)
+
+    def render_epic(epic_id: str, prefix: str, is_top_level: bool, is_last_sibling: bool) -> List[str]:
+        meta = epics[epic_id]
+        lines = []
+        
+        eff_status = get_effective_epic_status(root, epic_id, epics)
+        label, colour = _STATUS_STYLE.get(eff_status, ("[?]", ""))
+        colored_status = _c(colour, label)
+        
+        if is_top_level:
+            epic_line = _c(_BOLD, f"[Epic] {colored_status} {meta['name']}") + _c(_DIM, f" [{epic_id}]")
         else:
-            ordered = topological_sort(tickets)
-            for i, tid in enumerate(ordered):
-                meta = tickets[tid]
-                is_last = i == len(ordered) - 1
-                branch = "`-- " if is_last else "|-- "
-                label, colour = _STATUS_STYLE.get(
-                    meta["status"], ("[?]", "")
-                )
-                colored_name = _c(colour, f"{label} {meta['name']}")
-                line = f"   {branch}{_c(_DIM, tid)}  {colored_name}"
-                lines.append(line)
+            branch = "`-- " if is_last_sibling else "|-- "
+            epic_line = f"{prefix}{branch}" + _c(_BOLD, f"[Epic] {colored_status} {meta['name']}") + _c(_DIM, f" [{epic_id}]")
+            
+        lines.append(epic_line)
+        
+        if is_top_level:
+            cont_prefix = "   "
+        else:
+            cont_prefix = prefix + ("    " if is_last_sibling else "|   ")
+            
+        deps = meta.get("depends", [])
+        if deps:
+            dep_names = []
+            for d in deps:
+                if d in epics:
+                    dep_names.append(f"{d} ({epics[d]['name']})")
+                else:
+                    dep_names.append(d)
+            lines.append(
+                _c(_DIM, f"{cont_prefix}-> depends on: {', '.join(dep_names)}")
+            )
+            
+        tickets = tickets_by_epic.get(epic_id, {})
+        child_epics = {eid: emeta for eid, emeta in epics.items() if emeta.get("parent") == epic_id}
+        
+        if not tickets and not child_epics:
+            lines.append(_c(_DIM, f"{cont_prefix}(no tickets or sub-epics)"))
+        else:
+            ordered_tickets = sort_tickets(tickets, epic_id)
+            ordered_epics = sort_siblings(child_epics)
+            
+            children_list = [("ticket", tid) for tid in ordered_tickets] + [("epic", eid) for eid in ordered_epics]
+            
+            for idx, (kind, item_id) in enumerate(children_list):
+                is_last_child = (idx == len(children_list) - 1)
+                child_branch = "`-- " if is_last_child else "|-- "
+                
+                if kind == "ticket":
+                    tmeta = tickets[item_id]
+                    eff_tstatus = get_effective_ticket_status(root, epic_id, tmeta, epics)
+                    tlabel, tcolour = _STATUS_STYLE.get(eff_tstatus, ("[?]", ""))
+                    colored_tname = _c(tcolour, f"{tlabel} {tmeta['name']}")
+                    
+                    ticket_line = f"{cont_prefix}{child_branch}{_c(_DIM, item_id)}  {colored_tname}"
+                    lines.append(ticket_line)
+                    
+                    ticket_cont_prefix = cont_prefix + ("    " if is_last_child else "|   ")
+                    
+                    tdeps = tmeta.get("depends", [])
+                    if tdeps:
+                        tdep_names = []
+                        for td in tdeps:
+                            if td in tickets:
+                                tdep_names.append(f"{td} ({tickets[td]['name']})")
+                            else:
+                                tdep_names.append(td)
+                        lines.append(
+                            _c(_DIM, f"{ticket_cont_prefix}-> depends on: {', '.join(tdep_names)}")
+                        )
+                        
+                    if eff_tstatus in ("open", "in_progress"):
+                        ticket_steps = steps_by_ticket.get(item_id, [])
+                        for step in ticket_steps:
+                            if step["done"]:
+                                check = _c("\033[92m", "[x]")
+                                title = _c(_DIM, step["title"])
+                            else:
+                                check = _c(_DIM, "[ ]")
+                                title = step["title"]
+                            lines.append(f"{ticket_cont_prefix}{check} {title}")
+                            
+                elif kind == "epic":
+                    lines.extend(render_epic(item_id, prefix=cont_prefix, is_top_level=False, is_last_sibling=is_last_child))
+                    
+        return lines
 
-                # Continuation prefix for lines under this ticket
-                cont_prefix = "       " if is_last else "   |   "
-
-                # Show dependencies
-                deps = meta.get("depends", [])
-                if deps:
-                    dep_names = []
-                    for d in deps:
-                        if d in tickets:
-                            dep_names.append(f"{d} ({tickets[d]['name']})")
-                        else:
-                            dep_names.append(d)
-                    lines.append(
-                        _c(_DIM, f"{cont_prefix}-> depends on: {', '.join(dep_names)}")
-                    )
-
-                # Show steps (tasks)
-                if meta["status"] == "open":
-                    ticket_steps = steps_by_ticket.get(tid, [])
-                    for step in ticket_steps:
-                        if step["done"]:
-                            check = _c("\033[92m", "[x]")
-                            title = _c(_DIM, step["title"])
-                        else:
-                            check = _c(_DIM, "[ ]")
-                            title = step["title"]
-                        lines.append(f"{cont_prefix}{check} {title}")
-
-        if idx < len(sorted_epics) - 1:
-            lines.append("")  # blank separator between epics
-
+    lines: List[str] = []
+    top_level_epics = {eid: meta for eid, meta in epics.items() if not meta.get("parent") or meta.get("parent") not in epics}
+    top_level_ids = sort_siblings(top_level_epics)
+    
+    for idx, epic_id in enumerate(top_level_ids):
+        lines.extend(render_epic(epic_id, prefix="", is_top_level=True, is_last_sibling=(idx == len(top_level_ids) - 1)))
+        if idx < len(top_level_ids) - 1:
+            lines.append("")
+            
     return "\n".join(lines)
 
 
@@ -224,9 +295,140 @@ def _raw_ansi(code: str, text: str) -> str:
     return f"{code}{text}{_RESET}"
 
 
+def render_epic_interactive(
+    epic_id: str,
+    prefix: str,
+    is_top_level: bool,
+    is_last_sibling: bool,
+    root: "Path",
+    epics: Dict[str, Dict[str, Any]],
+    tickets_by_epic: Dict[str, Dict[str, Dict[str, Any]]],
+    steps_by_ticket: Dict[str, List[Dict[str, Any]]],
+    show_dependencies: bool,
+    empty_filepath_str: str,
+) -> List[Tuple[str, str]]:
+    from ltk.store import get_effective_epic_status, get_effective_ticket_status, get_epic_path
+    
+    meta = epics[epic_id]
+    lines = []
+    
+    eff_status = get_effective_epic_status(root, epic_id, epics)
+    label, colour = _STATUS_STYLE.get(eff_status, ("[?]", ""))
+    colored_status = _raw_ansi(colour, label)
+    
+    if is_top_level:
+        epic_line = _raw_ansi(_BOLD, f"[Epic] {colored_status} {meta['name']}") + _raw_ansi(_DIM, f" [{epic_id}]")
+    else:
+        branch = "`-- " if is_last_sibling else "|-- "
+        epic_line = f"{prefix}{branch}" + _raw_ansi(_BOLD, f"[Epic] {colored_status} {meta['name']}") + _raw_ansi(_DIM, f" [{epic_id}]")
+        
+    lines.append((empty_filepath_str, epic_line))
+    
+    if is_top_level:
+        cont_prefix = "   "
+    else:
+        cont_prefix = prefix + ("    " if is_last_sibling else "|   ")
+        
+    if show_dependencies:
+        deps = meta.get("depends", [])
+        if deps:
+            dep_names = []
+            for d in deps:
+                if d in epics:
+                    dep_names.append(f"{d} ({epics[d]['name']})")
+                else:
+                    dep_names.append(d)
+            lines.append((empty_filepath_str, _raw_ansi(_DIM, f"{cont_prefix}-> depends on: {', '.join(dep_names)}")))
+            
+    tickets = tickets_by_epic.get(epic_id, {})
+    child_epics = {eid: emeta for eid, emeta in epics.items() if emeta.get("parent") == epic_id}
+    
+    def sort_siblings(sibling_dict: Dict[str, Dict[str, Any]]) -> List[str]:
+        def key_func(eid):
+            smeta = sibling_dict[eid]
+            seff_status = get_effective_epic_status(root, eid, epics)
+            return (get_status_priority(seff_status), smeta["name"].lower())
+        return topological_sort(sibling_dict, key=key_func)
+
+    def sort_tickets(tickets_dict: Dict[str, Dict[str, Any]]) -> List[str]:
+        def key_func(tid):
+            tmeta = tickets_dict[tid]
+            teff_status = get_effective_ticket_status(root, epic_id, tmeta, epics)
+            has_deps = 1 if tmeta.get("depends") else 0
+            return (get_status_priority(teff_status), has_deps, tmeta["name"].lower())
+        return topological_sort(tickets_dict, key=key_func)
+
+    if not tickets and not child_epics:
+        lines.append((empty_filepath_str, _raw_ansi(_DIM, f"{cont_prefix}(no tickets or sub-epics)")))
+    else:
+        ordered_tickets = sort_tickets(tickets)
+        ordered_epics = sort_siblings(child_epics)
+        
+        children_list = [("ticket", tid) for tid in ordered_tickets] + [("epic", eid) for eid in ordered_epics]
+        
+        for idx, (kind, item_id) in enumerate(children_list):
+            is_last_child = (idx == len(children_list) - 1)
+            child_branch = "`-- " if is_last_child else "|-- "
+            
+            if kind == "ticket":
+                tmeta = tickets[item_id]
+                eff_tstatus = get_effective_ticket_status(root, epic_id, tmeta, epics)
+                tlabel, tcolour = _STATUS_STYLE.get(eff_tstatus, ("[?]", ""))
+                colored_tname = _raw_ansi(tcolour, f"{tlabel} {tmeta['name']}")
+                
+                epic_dir = get_epic_path(root, epic_id, epics)
+                filepath = str(epic_dir / f"{item_id}.md")
+                
+                branch_ansi = _raw_ansi(_DIM, cont_prefix + child_branch)
+                tid_ansi = _raw_ansi(_DIM, f"({item_id})")
+                display = f"{branch_ansi}{colored_tname} {tid_ansi}"
+                lines.append((filepath, display))
+                
+                ticket_cont_prefix = cont_prefix + ("    " if is_last_child else "|   ")
+                
+                if show_dependencies:
+                    tdeps = tmeta.get("depends", [])
+                    if tdeps:
+                        tdep_names = []
+                        for td in tdeps:
+                            if td in tickets:
+                                tdep_names.append(f"{td} ({tickets[td]['name']})")
+                            else:
+                                tdep_names.append(td)
+                        lines.append((filepath, _raw_ansi(_DIM, f"{ticket_cont_prefix}-> depends on: {', '.join(tdep_names)}")))
+                        
+                if eff_tstatus in ("open", "in_progress"):
+                    ticket_steps = steps_by_ticket.get(item_id, [])
+                    for step in ticket_steps:
+                        if step["done"]:
+                            check = _raw_ansi("\033[92m", "[x]")
+                            title = _raw_ansi(_DIM, step["title"])
+                        else:
+                            check = _raw_ansi(_DIM, "[ ]")
+                            title = step["title"]
+                        lines.append((filepath, f"{_raw_ansi(_DIM, ticket_cont_prefix)}{check} {title}"))
+                        
+            elif kind == "epic":
+                child_lines = render_epic_interactive(
+                    item_id,
+                    prefix=cont_prefix,
+                    is_top_level=False,
+                    is_last_sibling=is_last_child,
+                    root=root,
+                    epics=epics,
+                    tickets_by_epic=tickets_by_epic,
+                    steps_by_ticket=steps_by_ticket,
+                    show_dependencies=show_dependencies,
+                    empty_filepath_str=empty_filepath_str,
+                )
+                lines.extend(child_lines)
+                
+    return lines
+
+
 def run_interactive_tree(
     root: "Path",
-    epics: Dict[str, str],
+    epics: Dict[str, Dict[str, Any]],
     tickets_by_epic: Dict[str, Dict[str, Dict[str, Any]]],
     steps_by_ticket: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> None:
@@ -262,75 +464,39 @@ def run_interactive_tree(
                 except Exception:
                     pass  # Silently ignore parse failures
 
-        lines: List[str] = []
-        sorted_epics = sorted(epics.items(), key=lambda x: x[1].lower())
+        def sort_siblings(sibling_dict: Dict[str, Dict[str, Any]]) -> List[str]:
+            from ltk.store import get_effective_epic_status
+            def key_func(eid):
+                smeta = sibling_dict[eid]
+                seff_status = get_effective_epic_status(root, eid, epics)
+                return (get_status_priority(seff_status), smeta["name"].lower())
+            return topological_sort(sibling_dict, key=key_func)
 
-        for idx, (epic_id, epic_name) in enumerate(sorted_epics):
-            tickets = tickets_by_epic.get(epic_id, {})
-            
-            # Add epic header line
-            epic_header_display = _raw_ansi(_BOLD, f"[Epic] {epic_name}") + _raw_ansi(_DIM, f" [{epic_id}]")
-            lines.append(f"{empty_filepath_str}\t{epic_header_display}")
+        top_level_epics = {eid: meta for eid, meta in epics.items() if not meta.get("parent") or meta.get("parent") not in epics}
+        top_level_ids = sort_siblings(top_level_epics)
+        
+        interactive_tuples = []
+        for idx, epic_id in enumerate(top_level_ids):
+            child_lines = render_epic_interactive(
+                epic_id,
+                prefix="",
+                is_top_level=True,
+                is_last_sibling=(idx == len(top_level_ids) - 1),
+                root=root,
+                epics=epics,
+                tickets_by_epic=tickets_by_epic,
+                steps_by_ticket=steps_by_ticket,
+                show_dependencies=show_dependencies,
+                empty_filepath_str=empty_filepath_str,
+            )
+            interactive_tuples.extend(child_lines)
+            if idx < len(top_level_ids) - 1:
+                interactive_tuples.append((empty_filepath_str, ""))
 
-            if not tickets:
-                no_tickets_display = _raw_ansi(_DIM, "   (no tickets)")
-                lines.append(f"{empty_filepath_str}\t{no_tickets_display}")
-            else:
-                ordered = topological_sort(tickets)
-                for i, tid in enumerate(ordered):
-                    meta = tickets[tid]
-                    filepath = str(_P(root / epic_id / f"{tid}.md"))
-                    is_last = i == len(ordered) - 1
-                    branch = "`-- " if is_last else "|-- "
-                    label, colour = _STATUS_STYLE.get(
-                        meta["status"], ("[?]", "")
-                    )
-                    colored_label = _raw_ansi(colour, label)
-                    name_part = meta["name"]
-                    
-                    # Format: branch + colored_label + name_part + (tid)
-                    branch_ansi = _raw_ansi(_DIM, f"   {branch}")
-                    tid_ansi = _raw_ansi(_DIM, f"({tid})")
-                    display = f"{branch_ansi}{colored_label} {name_part} {tid_ansi}"
-                    lines.append(f"{filepath}\t{display}")
-
-                    cont_prefix = "       " if is_last else "   |   "
-
-                    # Show dependencies (if toggled on)
-                    if show_dependencies:
-                        deps = meta.get("depends", [])
-                        if deps:
-                            dep_names = []
-                            for d in deps:
-                                if d in tickets:
-                                    dep_names.append(f"{d} ({tickets[d]['name']})")
-                                else:
-                                    dep_names.append(d)
-                            dep_str = f"{cont_prefix}-> depends on: {', '.join(dep_names)}"
-                            lines.append(
-                                f"{filepath}\t{_raw_ansi(_DIM, dep_str)}"
-                            )
-
-                    # Show steps (tasks) under the ticket (only for open tickets)
-                    if meta["status"] == "open":
-                        ticket_steps = steps_by_ticket.get(tid, [])
-                        for step in ticket_steps:
-                            if step["done"]:
-                                check = _raw_ansi("\033[92m", "[x]")
-                                title = _raw_ansi(_DIM, step["title"])
-                            else:
-                                check = _raw_ansi(_DIM, "[ ]")
-                                title = step["title"]
-                            step_display = f"{_raw_ansi(_DIM, cont_prefix)}{check} {title}"
-                            lines.append(f"{filepath}\t{step_display}")
-            
-            if idx < len(sorted_epics) - 1:
-                lines.append(f"{empty_filepath_str}\t")
-
-        if not lines:
+        if not interactive_tuples:
             break
 
-        input_text = "\n".join(lines)
+        input_text = "\n".join(f"{filepath}\t{display}" for filepath, display in interactive_tuples)
 
         fzf_cmd = [
             "fzf",

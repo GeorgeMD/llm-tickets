@@ -61,11 +61,15 @@ def epic():
 
 @epic.command("create")
 @click.argument("name")
+@click.option("-p", "--parent", help="Parent epic ID, prefix, or name.")
 @_handle_error
-def epic_create(name):
+def epic_create(name, parent):
     """Create a new epic."""
     root = store.require_root()
-    epic_id = store.create_epic(root, name)
+    parent_id = None
+    if parent:
+        parent_id, _ = store.resolve_epic(root, parent)
+    epic_id = store.create_epic(root, name, parent_id)
     click.echo(
         click.style("[ok] ", fg="green")
         + f"Created epic {click.style(epic_id, bold=True)} \"{name}\""
@@ -81,12 +85,14 @@ def epic_list():
     if not epics:
         click.echo(click.style("No epics found.", fg="yellow"))
         return
-    # Column widths
     id_w = max(len(eid) for eid in epics)
-    for eid, name in sorted(epics.items(), key=lambda x: x[1].lower()):
+    sorted_epics = sorted(epics.items(), key=lambda x: x[1]["name"].lower())
+    for eid, meta in sorted_epics:
+        name = meta["name"]
         ticket_count = len(store.load_tickets(root, eid))
+        parent_str = f" (parent: {meta['parent']})" if meta.get("parent") else ""
         click.echo(
-            f"  {click.style(eid, bold=True):<{id_w + 8}}  {name}  "
+            f"  {click.style(eid, bold=True):<{id_w + 8}}  {name}{parent_str}  "
             f"{click.style(f'({ticket_count} tickets)', dim=True)}"
         )
 
@@ -95,13 +101,14 @@ def epic_list():
 @click.argument("epic_identifier")
 @_handle_error
 def epic_delete(epic_identifier):
-    """Delete an epic and all its tickets."""
+    """Delete an epic and all its tickets/sub-epics."""
     root = store.require_root()
-    epic_id, epic_name = store.resolve_epic(root, epic_identifier)
+    epic_id, epic_meta = store.resolve_epic(root, epic_identifier)
+    epic_name = epic_meta["name"]
     tickets = store.load_tickets(root, epic_id)
     click.echo(
         f"About to delete epic {click.style(epic_id, bold=True)} "
-        f"\"{epic_name}\" with {len(tickets)} ticket(s)."
+        f"\"{epic_name}\" with {len(tickets)} ticket(s) and all its sub-epics."
     )
     if not click.confirm("Are you sure?"):
         click.echo("Aborted.")
@@ -120,12 +127,52 @@ def epic_delete(epic_identifier):
 def epic_rename(epic_identifier, new_name):
     """Rename an epic."""
     root = store.require_root()
-    epic_id, old_name = store.resolve_epic(root, epic_identifier)
+    epic_id, epic_meta = store.resolve_epic(root, epic_identifier)
+    old_name = epic_meta["name"]
     store.rename_epic(root, epic_id, new_name)
     click.echo(
         click.style("[ok] ", fg="green")
         + f"Renamed {epic_id}: \"{old_name}\" -> \"{new_name}\""
     )
+
+
+@epic.command("start")
+@click.argument("epic_identifier")
+@_handle_error
+def epic_start(epic_identifier):
+    """Mark an epic as in progress."""
+    root = store.require_root()
+    epic_id, epic_meta = store.resolve_epic(root, epic_identifier)
+    changed = store.start_epic(root, epic_id)
+    if changed:
+        click.echo(
+            click.style("[ok] ", fg="green")
+            + f"Started epic {epic_id} \"{epic_meta['name']}\""
+        )
+    else:
+        click.echo(f"Epic {epic_id} is already in progress.")
+
+
+@epic.command("close")
+@click.argument("epic_identifier")
+@_handle_error
+def epic_close(epic_identifier):
+    """Close an epic and unblock dependent sibling epics."""
+    root = store.require_root()
+    epic_id, epic_meta = store.resolve_epic(root, epic_identifier)
+    unblocked = store.close_epic(root, epic_id)
+    click.echo(
+        click.style("[ok] ", fg="green")
+        + f"Closed epic {epic_id} \"{epic_meta['name']}\""
+    )
+    if unblocked:
+        epics = store.load_epics(root)
+        for uid in unblocked:
+            uname = epics[uid]["name"]
+            click.echo(
+                click.style("  >> ", fg="cyan")
+                + f"Unblocked epic {uid} \"{uname}\""
+            )
 
 
 # ── ticket group ───────────────────────────────────────────────────────────
@@ -142,7 +189,8 @@ def ticket():
 def ticket_create(epic_identifier, name):
     """Create a new ticket in an epic."""
     root = store.require_root()
-    epic_id, epic_name = store.resolve_epic(root, epic_identifier)
+    epic_id, epic_meta = store.resolve_epic(root, epic_identifier)
+    epic_name = epic_meta["name"]
     ticket_id = store.create_ticket(root, epic_id, name)
     click.echo(
         click.style("[ok] ", fg="green")
@@ -157,7 +205,8 @@ def ticket_create(epic_identifier, name):
 def ticket_list(epic_identifier):
     """List all tickets in an epic."""
     root = store.require_root()
-    epic_id, epic_name = store.resolve_epic(root, epic_identifier)
+    epic_id, epic_meta = store.resolve_epic(root, epic_identifier)
+    epic_name = epic_meta["name"]
     tickets = store.load_tickets(root, epic_id)
     output = utils.format_ticket_list(epic_id, epic_name, tickets)
     click.echo(output)
@@ -286,61 +335,93 @@ def ticket_start(ticket_identifier):
 
 @main.group()
 def dep():
-    """Manage dependencies between tickets."""
+    """Manage dependencies between tickets or epics."""
 
 
 @dep.command("add")
-@click.argument("ticket_identifier")
+@click.argument("identifier")
 @click.argument("dependencies", nargs=-1, required=True)
 @_handle_error
-def dep_add(ticket_identifier, dependencies):
-    """Mark a ticket as depending on one or more other tickets.
+def dep_add(identifier, dependencies):
+    """Mark a ticket/epic as depending on one or more others.
 
-    Dependencies must be within the same epic.
+    Tickets must depend on tickets within the same epic.
+    Epics must depend on epics at the same level.
     """
     root = store.require_root()
-    epic_id, ticket_id, meta = store.resolve_ticket(root, ticket_identifier)
+    
+    # Try resolving as ticket first
+    is_ticket = True
+    try:
+        epic_id, ticket_id, meta = store.resolve_ticket(root, identifier)
+    except (KeyError, ValueError):
+        is_ticket = False
 
-    # Resolve each dependency within the same epic
-    resolved_deps = []
-    for dep_ident in dependencies:
-        dep_id, _ = store.resolve_ticket_in_epic(root, epic_id, dep_ident)
-        resolved_deps.append(dep_id)
-
-    store.add_dependencies(root, epic_id, ticket_id, resolved_deps)
-
-    dep_names = ", ".join(resolved_deps)
-    click.echo(
-        click.style("[ok] ", fg="green")
-        + f"{ticket_id} now depends on: {dep_names}"
-    )
+    if is_ticket:
+        resolved_deps = []
+        for dep_ident in dependencies:
+            dep_id, _ = store.resolve_ticket_in_epic(root, epic_id, dep_ident)
+            resolved_deps.append(dep_id)
+        store.add_dependencies(root, epic_id, ticket_id, resolved_deps)
+        dep_names = ", ".join(resolved_deps)
+        click.echo(
+            click.style("[ok] ", fg="green")
+            + f"{ticket_id} now depends on: {dep_names}"
+        )
+    else:
+        # Resolve as epic
+        epic_id, epic_meta = store.resolve_epic(root, identifier)
+        resolved_deps = []
+        for dep_ident in dependencies:
+            dep_id, _ = store.resolve_epic(root, dep_ident)
+            resolved_deps.append(dep_id)
+        store.add_epic_dependencies(root, epic_id, resolved_deps)
+        dep_names = ", ".join(resolved_deps)
+        click.echo(
+            click.style("[ok] ", fg="green")
+            + f"{epic_id} now depends on: {dep_names}"
+        )
 
 
 @dep.command("rm")
-@click.argument("ticket_identifier")
+@click.argument("identifier")
 @click.argument("dependencies", nargs=-1, required=True)
 @_handle_error
-def dep_rm(ticket_identifier, dependencies):
-    """Remove one or more dependencies from a ticket.
-
-    Dependencies must be within the same epic.
-    """
+def dep_rm(identifier, dependencies):
+    """Remove one or more dependencies from a ticket/epic."""
     root = store.require_root()
-    epic_id, ticket_id, meta = store.resolve_ticket(root, ticket_identifier)
 
-    # Resolve each dependency within the same epic
-    resolved_deps = []
-    for dep_ident in dependencies:
-        dep_id, _ = store.resolve_ticket_in_epic(root, epic_id, dep_ident)
-        resolved_deps.append(dep_id)
+    # Try resolving as ticket first
+    is_ticket = True
+    try:
+        epic_id, ticket_id, meta = store.resolve_ticket(root, identifier)
+    except (KeyError, ValueError):
+        is_ticket = False
 
-    store.remove_dependencies(root, epic_id, ticket_id, resolved_deps)
-
-    dep_names = ", ".join(resolved_deps)
-    click.echo(
-        click.style("[ok] ", fg="green")
-        + f"Removed dependency on: {dep_names} from {ticket_id}"
-    )
+    if is_ticket:
+        resolved_deps = []
+        for dep_ident in dependencies:
+            dep_id, _ = store.resolve_ticket_in_epic(root, epic_id, dep_ident)
+            resolved_deps.append(dep_id)
+        store.remove_dependencies(root, epic_id, ticket_id, resolved_deps)
+        dep_names = ", ".join(resolved_deps)
+        click.echo(
+            click.style("[ok] ", fg="green")
+            + f"Removed dependency on: {dep_names} from {ticket_id}"
+        )
+    else:
+        # Resolve as epic
+        epic_id, epic_meta = store.resolve_epic(root, identifier)
+        resolved_deps = []
+        for dep_ident in dependencies:
+            dep_id, _ = store.resolve_epic(root, dep_ident)
+            resolved_deps.append(dep_id)
+        store.remove_epic_dependencies(root, epic_id, resolved_deps)
+        dep_names = ", ".join(resolved_deps)
+        click.echo(
+            click.style("[ok] ", fg="green")
+            + f"Removed dependency on: {dep_names} from {epic_id}"
+        )
 
 
 # ── tree ───────────────────────────────────────────────────────────────────
@@ -373,6 +454,6 @@ def tree(interactive):
     if interactive:
         utils.run_interactive_tree(root, epics, tickets_by_epic, steps_by_ticket)
     else:
-        output = utils.format_tree(epics, tickets_by_epic, steps_by_ticket)
+        output = utils.format_tree(root, epics, tickets_by_epic, steps_by_ticket)
         click.echo(output)
 
