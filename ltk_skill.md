@@ -30,25 +30,27 @@ Core guidelines for using `ltk`:
 
 ## Command Reference
 
-| Command           | Usage                                     | Description                                                         |
-| :---------------- | :---------------------------------------- | :------------------------------------------------------------------ |
-| **init**          | `ltk init .`                              | Initializes a `.tickets/` store in the project root.                |
-| **epic create**   | `ltk epic create "<name>"`                | Creates a new epic. Returns the `epic-xxxxxx` ID.                   |
-| **epic list**     | `ltk epic list`                           | Lists all epics and the number of tickets in each.                  |
-| **epic rename**   | `ltk epic rename <epic> "<new_name>"`     | Renames an epic.                                                    |
-| **epic delete**   | `ltk epic delete <epic>`                  | Deletes an epic and all of its tickets (requires confirmation).     |
-| **ticket create** | `ltk ticket create <epic> "<name>"`       | Creates a ticket in an epic. Returns the `xx-xxxxxx` ID.            |
-| **ticket list**   | `ltk ticket list <epic>`                  | Lists all tickets for a specific epic in a table view.              |
-| **ticket edit**   | `ltk ticket edit <ticket> "<markdown>"`   | Overwrites a ticket's `.md` file content with description.          |
-| **ticket show**   | `ltk ticket show <ticket>`               | Prints the markdown content of a ticket.                            |
-| **dep add**       | `ltk dep add <ticket> <dep_tickets...>`   | Marks a ticket as dependent on others (within the same epic).       |
-| **dep rm**        | `ltk dep rm <ticket> <dep_tickets...>`    | Removes dependency relationships between tickets.                   |
-| **ticket rename** | `ltk ticket rename <ticket> "<new_name>"` | Renames a ticket.                                                   |
-| **ticket close**  | `ltk ticket close <ticket>`               | Closes a ticket, automatically unblocking dependent tickets.        |
-| **ticket start**  | `ltk ticket start <ticket>`               | Marks a ticket as in progress.                                      |
-| **ticket delete** | `ltk ticket delete <ticket>`              | Deletes a ticket and removes it from all dependency lists.          |
-| **tree**          | `ltk tree`                                | Displays the hierarchical tree of epics, tickets, and dependencies. |
-| **tree -i**       | `ltk tree -i`                             | Opens the interactive terminal browser using `fzf` and `glow`.      |
+| Command            | Usage                                          | Description                                                         |
+| :----------------- | :--------------------------------------------- | :------------------------------------------------------------------ |
+| **init**           | `ltk init .`                                   | Initializes a `.tickets/` store in the project root.                |
+| **epic create**    | `ltk epic create "<name>" [-p/--parent <p>]`   | Creates a new epic, optionally nested under a parent epic.          |
+| **epic list**      | `ltk epic list`                                | Lists all epics and their parent associations.                      |
+| **epic rename**    | `ltk epic rename <epic> "<new_name>"`          | Renames an epic.                                                    |
+| **epic start**     | `ltk epic start <epic>`                        | Marks an epic as in progress.                                       |
+| **epic close**     | `ltk epic close <epic>`                        | Closes an epic and unblocks dependent sibling epics.                |
+| **epic delete**    | `ltk epic delete <epic>`                       | Deletes an epic and all its nested tickets and sub-epics recursively.|
+| **ticket create**  | `ltk ticket create <epic> "<name>"`            | Creates a ticket in an epic. Returns the `xx-xxxxxx` ID.            |
+| **ticket list**    | `ltk ticket list <epic>`                       | Lists all tickets for a specific epic in a table view.              |
+| **ticket edit**    | `ltk ticket edit <ticket> "<markdown>"`        | Overwrites a ticket's `.md` file content with description.          |
+| **ticket show**    | `ltk ticket show <ticket>`                    | Prints the markdown content of a ticket.                            |
+| **dep add**        | `ltk dep add <id> <dependencies...>`           | Sets dependencies. Tickets depend on tickets; epics on epics.       |
+| **dep rm**         | `ltk dep rm <id> <dependencies...>`            | Removes dependency relationships.                                   |
+| **ticket rename**  | `ltk ticket rename <ticket> "<new_name>"`      | Renames a ticket.                                                   |
+| **ticket close**   | `ltk ticket close <ticket>`                    | Closes a ticket, automatically unblocking dependent tickets.        |
+| **ticket start**   | `ltk ticket start <ticket>`                    | Marks a ticket as in progress.                                      |
+| **ticket delete**  | `ltk ticket delete <ticket>`                   | Deletes a ticket and removes it from all dependency lists.          |
+| **tree**           | `ltk tree`                                     | Displays the sorted tree of nested epics, tickets, and dependencies.|
+| **tree -i**        | `ltk tree -i`                                  | Opens the interactive terminal browser using `fzf` and `glow`.      |
 
 ---
 
@@ -68,37 +70,42 @@ At the start of any coding task:
 
 Break down your work into manageable tasks:
 
-- Create an epic for your feature/milestone:
+- Create a parent epic for your feature/milestone:
   ```bash
   ltk epic create "User Authentication"
-  # Returns: Created epic <epic id> "User Authentication" in .tickets
+  # Returns: Created epic epic-a1b2c3 "User Authentication"
+  ```
+- Create nested sub-epics if needed:
+  ```bash
+  ltk epic create "OAuth Support" -p epic-a1b2c3
+  # Returns: Created epic epic-d4e5f6 "OAuth Support"
   ```
 - Create tickets for individual components:
   ```bash
-  ltk ticket create <epic id> "Implement Login Endpoint"
-  # Returns: Created ticket <ticket 1 id> "Implement Login Endpoint" in <epic id>
-
-  ltk ticket create <epic id> "Implement Session Management"
-  # Returns: Created ticket <ticket 2 id> "Implement Session Management" in <epic id>
+  ltk ticket create epic-d4e5f6 "Implement Login Endpoint"
+  # Returns: Created ticket xx-xxxxxx "Implement Login Endpoint" in epic-d4e5f6
   ```
 
 ### 3. Setting Up and Removing Dependencies
 
-If a task requires another to be done first, declare the dependency:
+If a task or epic requires another to be done first, declare the dependency:
 
-```bash
-ltk dep add <ticket 2 id> <ticket 1 id>
-# Sets ticket 1 as a dependency of ticket 2. So ticket 2 will be marked as [blocked] until ticket 1 is closed.
-```
+- **Epic Dependencies**: Epics can only depend on sibling epics at the same level:
+  ```bash
+  ltk dep add epic-sibling-b epic-sibling-a
+  # Sets epic-sibling-b to [blocked] until epic-sibling-a is closed.
+  ```
+- **Ticket Dependencies**: Tickets can only depend on other tickets in the same epic:
+  ```bash
+  ltk dep add ticket-b ticket-a
+  # Sets ticket-b to [blocked] until ticket-a is closed.
+  ```
 
 To remove a dependency:
 
 ```bash
-ltk dep rm <ticket 2 id> <ticket 1 id>
-# Removes the dependency of ticket 2 on ticket 1. Only useful when you link 2 tickets by mistake.
+ltk dep rm <identifier> <dependency>
 ```
-
-_Note: Dependencies are only supported within the same epic._
 
 ### 4. Updating Ticket Descriptions
 
@@ -116,60 +123,35 @@ echo -e "## Requirements\n- Verify passwords using bcrypt\n- Return JWT token on
 
 ### 5. Managing Status Updates
 
-- **Blocked**: Tickets with unclosed dependencies are automatically marked
-  `[blocked]`.
-- **Open**: Tickets with no dependencies, or whose dependencies are all closed,
-  are marked `[open]`.
-- **In Progress**: To mark a ticket as being actively worked on, run:
+- **Blocked**: Epics/tickets are automatically marked `[blocked]` if they have unclosed dependencies. Tickets under blocked epics are also automatically effectively blocked.
+- **Open**: Active tickets/epics with no open dependencies are marked `[open]`.
+- **In Progress**: Mark active items as being worked on:
   ```bash
+  ltk epic start <epic id>
   ltk ticket start <ticket id>
   ```
-- **Closed**: When a task is complete, run:
+- **Closed**: When complete, close the item to unblock dependent items:
   ```bash
-  ltk ticket close <ticket 1 id>
-  # This automatically unblocks <ticket 2 id>, transitioning its status from [blocked] to [open].
+  ltk epic close <epic id>
+  ltk ticket close <ticket id>
   ```
 
 ### 6. Task Tracking with Steps
 
 Break each ticket into concrete tasks using a `# Steps` section in the ticket
-markdown. Each `##` heading under `# Steps` is a task. Prefix a heading with ✅
-to mark it as done. `ltk tree` will render tasks with `[x]`/`[ ]` checkboxes (only for tickets in the `open` status).
+markdown. Prefix a heading with ✅ to mark it as done. `ltk tree` renders tasks with `[x]`/`[ ]` checkboxes (only for open/in-progress tickets).
 
-When editing a ticket, structure it like this:
-
-```bash
-ltk ticket edit <ticket id> "# Ticket Title
-
-Description of the work to be done.
-
+```markdown
 # Steps
 
 ## First task
-
 Details about the first task.
 
 ## ✅ Second task (already done)
-
 Details about the second task.
-
-## Third task
-
-Details about the third task."
-```
-
-Each task can contain rich markdown (paragraphs, code blocks, lists, H3+
-sub-headings) under its `##` heading. `ltk tree` output will show:
-
-```
-[Epic] Backend [epic-a1b2c3]
-   `-- c3-x9y8z7  [open] Ticket Title
-       [ ] First task
-       [x] Second task (already done)
-       [ ] Third task
 ```
 
 ### 7. Troubleshooting Cycles
 
 If you encounter a `circular dependency` error, rethink the way you split the
-work accross tickets to break the cycle.
+work across items to break the cycle.
