@@ -503,7 +503,6 @@ def run_interactive_tree(
             "--ansi",
             "--delimiter", "\t",
             "--with-nth", "2..",
-            "--wrap",
             "--bind", f"ctrl-h:execute({sys.executable} -m ltk help-menu)+clear-screen",
             "--bind", f"f1:execute({sys.executable} -m ltk help-menu)+clear-screen",
             "--bind", "alt-z:toggle-wrap",
