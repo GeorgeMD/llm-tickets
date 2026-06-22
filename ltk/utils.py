@@ -653,8 +653,8 @@ def show_help_menu() -> None:
     start_row = max(1, (rows - box_height) // 2)
     start_col = max(1, (cols - box_width) // 2)
 
-    # Reset style
-    out.write("\033[0m")
+    # Reset style, switch to alternate screen buffer, and clear screen
+    out.write("\033[0m\033[?1049h\033[2J")
 
     # Top border
     out.write(f"\033[{start_row};{start_col}H")
@@ -693,6 +693,10 @@ def show_help_menu() -> None:
             sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    # Restore main screen buffer
+    out.write("\033[?1049l")
+    out.flush()
 
     if out is not sys.stdout:
         out.close()
