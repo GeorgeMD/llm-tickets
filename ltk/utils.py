@@ -504,8 +504,8 @@ def run_interactive_tree(
             "--delimiter", "\t",
             "--with-nth", "2..",
             "--wrap",
-            "--bind", f"ctrl-h:execute({sys.executable} -m ltk help-menu)",
-            "--bind", f"f1:execute({sys.executable} -m ltk help-menu)",
+            "--bind", f"ctrl-h:execute({sys.executable} -m ltk help-menu)+clear-screen",
+            "--bind", f"f1:execute({sys.executable} -m ltk help-menu)+clear-screen",
             "--bind", "alt-z:toggle-wrap",
             "--preview", "glow -s dark {1}",
             "--preview-window", "right:60%:wrap:border-left",
@@ -605,6 +605,61 @@ def open_editor(initial_content: str = "") -> Optional[str]:
             pass
 
 
+def get_physical_terminal_size() -> tuple:
+    import platform
+    import sys
+    import os
+
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            class COORD(ctypes.Structure):
+                _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+            class SMALL_RECT(ctypes.Structure):
+                _fields_ = [("Left", ctypes.c_short), ("Top", ctypes.c_short),
+                            ("Right", ctypes.c_short), ("Bottom", ctypes.c_short)]
+
+            class CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+                _fields_ = [("dwSize", COORD),
+                            ("dwCursorPosition", COORD),
+                            ("wAttributes", ctypes.c_ushort),
+                            ("srWindow", SMALL_RECT),
+                            ("dwMaximumWindowSize", COORD)]
+
+            h = ctypes.windll.kernel32.CreateFileW(
+                "CONOUT$", 0x40000000 | 0x80000000, 2, None, 3, 0, None
+            )
+            if h != -1:
+                csbi = CONSOLE_SCREEN_BUFFER_INFO()
+                success = ctypes.windll.kernel32.GetConsoleScreenBufferInfo(h, ctypes.byref(csbi))
+                ctypes.windll.kernel32.CloseHandle(h)
+                if success:
+                    cols = csbi.srWindow.Right - csbi.srWindow.Left + 1
+                    rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1
+                    return cols, rows
+        except Exception:
+            pass
+    else:
+        try:
+            import fcntl
+            import termios
+            import struct
+            with open("/dev/tty", "r") as tty:
+                h, w = struct.unpack('hh', fcntl.ioctl(tty.fileno(), termios.TIOCGWINSZ, struct.pack('hh', 0, 0)))
+                return w, h
+        except Exception:
+            pass
+
+    # Fallback to standard library
+    try:
+        import shutil
+        size = shutil.get_terminal_size(fallback=(80, 24))
+        return size.columns, size.lines
+    except Exception:
+        return 80, 24
+
+
 def show_help_menu() -> None:
     """Show interactive help popup centered on terminal."""
     import os
@@ -620,13 +675,7 @@ def show_help_menu() -> None:
     except Exception:
         out = sys.stdout
 
-    try:
-        cols, rows = os.get_terminal_size(out.fileno())
-    except Exception:
-        try:
-            cols, rows = os.get_terminal_size()
-        except Exception:
-            cols, rows = 80, 24
+    cols, rows = get_physical_terminal_size()
 
     # Determine encoding compatibility for box drawing characters
     try:
@@ -649,15 +698,16 @@ def show_help_menu() -> None:
         "Press any key to close"
     ]
 
-    # Calculate dimensions
-    box_width = max(len(line) if line != "SEP" else 20 for line in help_lines) + 4
+    # Calculate dimensions correctly to avoid overflow
+    max_len = max(len(line) if line != "SEP" else 20 for line in help_lines)
+    box_width = max_len + 6
     box_height = len(help_lines) + 2
 
     start_row = max(1, (rows - box_height) // 2)
     start_col = max(1, (cols - box_width) // 2)
 
-    # Reset style, switch to alternate screen buffer, and clear screen
-    out.write("\033[0m\033[?1049h\033[2J")
+    # Reset style
+    out.write("\033[0m")
 
     # Top border
     out.write(f"\033[{start_row};{start_col}H")
@@ -709,10 +759,6 @@ def show_help_menu() -> None:
             sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-    # Restore main screen buffer
-    out.write("\033[?1049l")
-    out.flush()
 
     if out is not sys.stdout:
         out.close()
