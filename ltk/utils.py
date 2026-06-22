@@ -509,7 +509,7 @@ def run_interactive_tree(
             "--bind", "alt-z:toggle-wrap",
             "--preview", "glow -s dark {1}",
             "--preview-window", "right:60%:wrap:border-left",
-            "--header", "Tickets  |  Ctrl+H for help, Esc to quit\n\n",
+            "--header", "Tickets  |  Ctrl+H or F1 for help, Esc to quit\n\n",
             "--no-sort",
             "--reverse",
             "--border", "rounded",
