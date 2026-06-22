@@ -622,8 +622,11 @@ def show_help_menu() -> None:
 
     try:
         cols, rows = os.get_terminal_size(out.fileno())
-    except OSError:
-        cols, rows = 80, 24
+    except Exception:
+        try:
+            cols, rows = os.get_terminal_size()
+        except Exception:
+            cols, rows = 80, 24
 
     # Determine encoding compatibility for box drawing characters
     try:
