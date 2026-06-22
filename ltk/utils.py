@@ -503,6 +503,7 @@ def run_interactive_tree(
             "--ansi",
             "--delimiter", "\t",
             "--with-nth", "2..",
+            "--wrap",
             "--preview", "glow -s dark {1}",
             "--preview-window", "right:60%:wrap:border-left",
             "--header", "Tickets  |  arrows to navigate, type to filter, Ctrl+R to refresh, Ctrl+D to toggle deps, Esc to quit\n\n",
