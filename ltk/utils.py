@@ -609,6 +609,16 @@ def show_help_menu() -> None:
     """Show interactive help popup centered on terminal."""
     import os
     import sys
+    import platform
+
+    # Get direct terminal write stream to ensure visibility under fzf execute
+    try:
+        if platform.system() == "Windows":
+            out = open("CONOUT$", "w", encoding="utf-8")
+        else:
+            out = open("/dev/tty", "w", encoding="utf-8")
+    except Exception:
+        out = sys.stdout
 
     try:
         cols, rows = os.get_terminal_size()
@@ -617,7 +627,7 @@ def show_help_menu() -> None:
 
     # Determine encoding compatibility for box drawing characters
     try:
-        enc = sys.stdout.encoding or "utf-8"
+        enc = out.encoding or "utf-8"
         "╔═╗║╚╝─".encode(enc)
         c_tl, c_tr, c_bl, c_br, c_h, c_v, c_s = "╔", "╗", "╚", "╝", "═", "║", "─"
     except Exception:
@@ -644,30 +654,30 @@ def show_help_menu() -> None:
     start_col = max(1, (cols - box_width) // 2)
 
     # Reset style
-    sys.stdout.write("\033[0m")
+    out.write("\033[0m")
 
     # Top border
-    sys.stdout.write(f"\033[{start_row};{start_col}H")
-    sys.stdout.write(c_tl + c_h * (box_width - 2) + c_tr)
+    out.write(f"\033[{start_row};{start_col}H")
+    out.write(c_tl + c_h * (box_width - 2) + c_tr)
 
     # Content rows
     for i, line in enumerate(help_lines):
-        sys.stdout.write(f"\033[{start_row + 1 + i};{start_col}H")
+        out.write(f"\033[{start_row + 1 + i};{start_col}H")
         if line == "SEP":
             padded = "".center(box_width - 4, c_s)
         elif ":" in line:
             padded = "  " + line.ljust(box_width - 6)
         else:
             padded = line.center(box_width - 4)
-        sys.stdout.write(c_v + " " + padded + " " + c_v)
+        out.write(c_v + " " + padded + " " + c_v)
 
     # Bottom border
-    sys.stdout.write(f"\033[{start_row + box_height - 1};{start_col}H")
-    sys.stdout.write(c_bl + c_h * (box_width - 2) + c_br)
+    out.write(f"\033[{start_row + box_height - 1};{start_col}H")
+    out.write(c_bl + c_h * (box_width - 2) + c_br)
 
     # Move cursor to bottom-right of box to avoid visual clutter
-    sys.stdout.write(f"\033[{start_row + box_height - 2};{start_col + box_width - 3}H")
-    sys.stdout.flush()
+    out.write(f"\033[{start_row + box_height - 2};{start_col + box_width - 3}H")
+    out.flush()
 
     # Wait for keypress
     try:
@@ -683,4 +693,7 @@ def show_help_menu() -> None:
             sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    if out is not sys.stdout:
+        out.close()
 
