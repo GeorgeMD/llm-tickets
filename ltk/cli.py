@@ -457,3 +457,10 @@ def tree(interactive):
         output = utils.format_tree(root, epics, tickets_by_epic, steps_by_ticket)
         click.echo(output)
 
+
+@main.command("help-menu", hidden=True)
+@_handle_error
+def help_menu():
+    """Display the interactive help popup."""
+    utils.show_help_menu()
+

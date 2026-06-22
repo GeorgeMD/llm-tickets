@@ -504,10 +504,11 @@ def run_interactive_tree(
             "--delimiter", "\t",
             "--with-nth", "2..",
             "--wrap",
+            "--bind", f"ctrl-h:execute({sys.executable} -m ltk help-menu)",
             "--bind", "alt-z:toggle-wrap",
             "--preview", "glow -s dark {1}",
             "--preview-window", "right:60%:wrap:border-left",
-            "--header", "Tickets  |  arrows to navigate, type to filter, Ctrl+R to refresh, Ctrl+D to toggle deps, Alt+Z to toggle wrap, Esc to quit\n\n",
+            "--header", "Tickets  |  Ctrl+H for help, Esc to quit\n\n",
             "--no-sort",
             "--reverse",
             "--border", "rounded",
@@ -601,4 +602,84 @@ def open_editor(initial_content: str = "") -> Optional[str]:
             os.unlink(tmp_path)
         except OSError:
             pass
+
+
+def show_help_menu() -> None:
+    """Show interactive help popup centered on terminal."""
+    import os
+    import sys
+
+    try:
+        cols, rows = os.get_terminal_size()
+    except OSError:
+        cols, rows = 80, 24
+
+    # Determine encoding compatibility for box drawing characters
+    try:
+        enc = sys.stdout.encoding or "utf-8"
+        "╔═╗║╚╝─".encode(enc)
+        c_tl, c_tr, c_bl, c_br, c_h, c_v, c_s = "╔", "╗", "╚", "╝", "═", "║", "─"
+    except Exception:
+        c_tl, c_tr, c_bl, c_br, c_h, c_v, c_s = "+", "+", "+", "+", "-", "|", "-"
+
+    help_lines = [
+        "LTK INTERACTIVE HELP",
+        "SEP",
+        "Ctrl+R  : Refresh the view",
+        "Ctrl+D  : Toggle ticket dependencies",
+        "Alt+Z   : Toggle line wrapping",
+        "Arrows  : Navigate the tree",
+        "Enter   : Edit selected ticket",
+        "Esc     : Quit interactive mode",
+        "SEP",
+        "Press any key to close"
+    ]
+
+    # Calculate dimensions
+    box_width = max(len(line) if line != "SEP" else 20 for line in help_lines) + 4
+    box_height = len(help_lines) + 2
+
+    start_row = max(1, (rows - box_height) // 2)
+    start_col = max(1, (cols - box_width) // 2)
+
+    # Reset style
+    sys.stdout.write("\033[0m")
+
+    # Top border
+    sys.stdout.write(f"\033[{start_row};{start_col}H")
+    sys.stdout.write(c_tl + c_h * (box_width - 2) + c_tr)
+
+    # Content rows
+    for i, line in enumerate(help_lines):
+        sys.stdout.write(f"\033[{start_row + 1 + i};{start_col}H")
+        if line == "SEP":
+            padded = "".center(box_width - 4, c_s)
+        elif ":" in line:
+            padded = "  " + line.ljust(box_width - 6)
+        else:
+            padded = line.center(box_width - 4)
+        sys.stdout.write(c_v + " " + padded + " " + c_v)
+
+    # Bottom border
+    sys.stdout.write(f"\033[{start_row + box_height - 1};{start_col}H")
+    sys.stdout.write(c_bl + c_h * (box_width - 2) + c_br)
+
+    # Move cursor to bottom-right of box to avoid visual clutter
+    sys.stdout.write(f"\033[{start_row + box_height - 2};{start_col + box_width - 3}H")
+    sys.stdout.flush()
+
+    # Wait for keypress
+    try:
+        import msvcrt
+        msvcrt.getch()
+    except ImportError:
+        import tty
+        import termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
