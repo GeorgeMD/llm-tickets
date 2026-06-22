@@ -679,6 +679,19 @@ def show_help_menu() -> None:
     out.write(f"\033[{start_row + box_height - 2};{start_col + box_width - 3}H")
     out.flush()
 
+    # Drain any pending keypresses in the input buffer first
+    try:
+        import msvcrt
+        while msvcrt.kbhit():
+            msvcrt.getch()
+    except ImportError:
+        import select
+        try:
+            while select.select([sys.stdin], [], [], 0)[0]:
+                sys.stdin.read(1)
+        except Exception:
+            pass
+
     # Wait for keypress
     try:
         import msvcrt
