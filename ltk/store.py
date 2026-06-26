@@ -308,7 +308,7 @@ def read_ticket(root: Path, epic_id: str, ticket_id: str) -> str:
     ticket_path = epic_dir / f"{ticket_id}.md"
     if not ticket_path.exists():
         raise FileNotFoundError(f"Ticket file not found: {ticket_path}")
-    return ticket_path.read_text(encoding="utf-8")
+    return ticket_path.read_text(encoding="utf-8-sig")
 
 
 import re
@@ -712,7 +712,7 @@ def resolve_ticket_in_epic(
 def _load_json(path: Path) -> dict:
     if not path.exists():
         return {}
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8-sig") as fh:
         return json.load(fh)
 
 

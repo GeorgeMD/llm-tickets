@@ -152,3 +152,20 @@ class TestStore(unittest.TestCase):
         self.assertIn("Other Epic", output)
         self.assertIn("Ticket in Parent", output)
         self.assertIn("Ticket in Child", output)
+
+    def test_utf8_bom_handling(self):
+        epic_id = store.create_epic(self.tickets_root, "Epic A")
+        ticket_id = store.create_ticket(self.tickets_root, epic_id, "Ticket A")
+        
+        # Write ticket file with UTF-8 BOM manually
+        epics = store.load_epics(self.tickets_root)
+        epic_path = store.get_epic_path(self.tickets_root, epic_id, epics)
+        ticket_file = epic_path / f"{ticket_id}.md"
+        
+        # Prepend BOM manually
+        ticket_file.write_text("\ufeff# Ticket A\nSome content", encoding="utf-8")
+        
+        # Read ticket
+        content = store.read_ticket(self.tickets_root, epic_id, ticket_id)
+        self.assertEqual(content, "# Ticket A\nSome content")
+

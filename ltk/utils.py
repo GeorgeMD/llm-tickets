@@ -592,7 +592,7 @@ def open_editor(initial_content: str = "") -> Optional[str]:
 
     try:
         subprocess.run(f'{editor} "{tmp_path}"', shell=True, check=True)
-        with open(tmp_path, "r", encoding="utf-8") as fh:
+        with open(tmp_path, "r", encoding="utf-8-sig") as fh:
             content = fh.read()
         return content
     except subprocess.CalledProcessError:
